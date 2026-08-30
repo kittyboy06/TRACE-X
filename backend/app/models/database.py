@@ -19,7 +19,7 @@ class InvestigationModel(Base):
 class EvidenceRecordModel(Base):
     __tablename__ = "evidence_records"
     evidence_id = Column(String, primary_key=True, index=True)
-    investigation_id = Column(String, nullable=False, index=True)
+    investigation_id = Column(String, primary_key=True, index=True)
     source_uri = Column(String, nullable=False)
     artifact_type = Column(String, nullable=False)
     collected_at = Column(DateTime, nullable=False)
@@ -28,10 +28,6 @@ class EvidenceRecordModel(Base):
     extractor_version = Column(String, nullable=False)
     model_version = Column(String, nullable=True)
     provenance_chain = Column(JSON, nullable=False)
-
-    __table_args__ = (
-        UniqueConstraint('investigation_id', 'content_hash', name='uix_inv_content_hash'),
-    )
 
 
 class AttributionAssessmentModel(Base):

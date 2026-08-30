@@ -76,9 +76,10 @@ class IngestionService:
     @staticmethod
     def load_benchmark_package(db: Session, case_id: str) -> Tuple[InvestigationModel, List[ProvenanceRecord]]:
         """Loads pre-configured benchmark scenario from disk and ingests all artifacts."""
-        file_path = f"app/data/benchmark_{case_id}.json"
-        if not file_path.endswith(".json"):
-            file_path += ".json"
+        import os
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        filename = f"benchmark_{case_id}.json" if not case_id.endswith(".json") else f"benchmark_{case_id}"
+        file_path = os.path.join(base_dir, "data", filename)
             
         with open(file_path, "r", encoding="utf-8") as f:
             data = json.load(f)

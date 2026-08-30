@@ -17,11 +17,11 @@
 ### Key Innovations for SIH26151 Evaluators:
 1. **Two-Level Contradiction Model**:
    - **Level 1 (Channel Reliability Dampening)**: Anomalies like CoinJoin collaborative transactions reduce financial signal confidence rather than globally penalizing unrelated cryptographic or stylometric evidence.
-   - **Level 2 (Global Hard Gating Overrides)**: Mutually exclusive operational activities (e.g. simultaneous authenticated postings across disparate geographic endpoints) trigger a **Hard Gate**, overriding the numerical score and safely failing closed to **`INCONCLUSIVE`** (preventing false-positive hallucinations).
+   - **Level 2 (Global Hard Gating Overrides)**: Mutually exclusive operational activities (e.g. simultaneous authenticated activity associated with infrastructure endpoints geolocated to Frankfurt and Singapore) trigger a **Hard Gate**, overriding the numerical score and safely failing closed to **`INCONCLUSIVE`** (preventing false-positive hallucinations).
 2. **Permanent Identity Scope Guard**:
    - Explicitly displays `REAL-WORLD IDENTITY: NOT ESTABLISHED` by default, recognizing that darknet de-anonymization provides persona correlation while physical citizen identification requires authorized external KYC subpoenas and warrants.
 3. **Append-Only Tamper-Evident Audit Trail**:
-   - Human analysts validate hypotheses via `[✔ CONFIRM]`, `[✖ REJECT]`, or `[? INVESTIGATE]`. Every decision is signed with an immutable SHA-256 event hash.
+   - Human analysts validate hypotheses via `[✔ CONFIRM]`, `[✖ REJECT]`, or `[? INVESTIGATE]`. Every decision is recorded in an append-only audit log with a SHA-256 integrity hash.
 4. **Interactive Sensitivity Tuner**:
    - Evaluators can tune evidentiary weights (*Cryptographic, Financial, Stylometric, Infrastructure, Behavioral*) in real-time and observe instant transparent recalculation.
 
@@ -119,8 +119,8 @@ npm run dev
 
 | Scenario | Objective | Observed Evidence | Two-Level Contradiction Behavior | Final Attribution State |
 | :--- | :--- | :--- | :--- | :--- |
-| **Case 1: GhostSpecter Migration** | Multi-Modal Convergence | PGP Key reuse (`0x9B8A7C`), UTXO peeling chain to Kraken VASP, 0.84 NLP stylometry similarity, sequential dormancy window | CoinJoin hop detected $\to$ Level 1 Financial reliability dampened to 54%. Base score: **0.81**. | **`LIKELY LINK`** (High Confidence) |
-| **Case 2: Deceptive Concurrency** | Anti-False-Positive Safety | High stylometry similarity (0.86), but distinct PGP keys, Samourai Whirlpool mixing, and simultaneous authenticated logins across disparate nodes | Hard Gate Triggered: `TEMPORAL_CONCURRENCY_CLASH` $\to$ Score overridden. | **`INCONCLUSIVE`** (Safe Fail-Closed) |
+| **Case 1: GhostSpecter Migration** | Multi-Modal Convergence | PGP Key reuse (`0x9B8A7C`), UTXO peeling chain to Kraken VASP, 0.84 NLP stylometry similarity ($\ge 150$ words), sequential dormancy window | CoinJoin hop detected $\to$ Level 1 Financial reliability dampened to 54%. Base score: **0.766**. | **`LIKELY LINK`** (High Confidence) |
+| **Case 2: Deceptive Concurrency** | Anti-False-Positive Safety | High stylometry similarity (0.86), but distinct PGP keys, Samourai Whirlpool mixing, and simultaneous authenticated activity across distinct infrastructure endpoints | Hard Gate Triggered: `TEMPORAL_CONCURRENCY_CLASH` $\to$ Score overridden. | **`INCONCLUSIVE`** (Safe Fail-Closed) |
 
 ---
 

@@ -28,7 +28,9 @@ def get_cytoscape_graph(investigation_id: str, db: Session = Depends(get_db)):
         for r in records
     ]
 
-    assess_record = db.query(AttributionAssessmentModel).filter(AttributionAssessmentModel.investigation_id == investigation_id).first()
+    assess_record = db.query(AttributionAssessmentModel).filter(
+        AttributionAssessmentModel.investigation_id == investigation_id
+    ).order_by(AttributionAssessmentModel.created_at.desc()).first()
     state = assess_record.attribution_state if assess_record else "INCONCLUSIVE"
     
     # Check if hard gate triggered

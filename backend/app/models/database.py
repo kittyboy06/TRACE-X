@@ -29,6 +29,10 @@ class EvidenceRecordModel(Base):
     model_version = Column(String, nullable=True)
     provenance_chain = Column(JSON, nullable=False)
 
+    __table_args__ = (
+        UniqueConstraint("investigation_id", "content_hash", name="uq_investigation_content_hash"),
+    )
+
 
 class AttributionAssessmentModel(Base):
     __tablename__ = "attribution_assessments"
@@ -39,6 +43,7 @@ class AttributionAssessmentModel(Base):
     base_score = Column(Float, nullable=False)
     evidence_score = Column(Float, nullable=False)
     real_world_identity = Column(String, default="NOT ESTABLISHED")
+    is_current = Column(Boolean, default=True, index=True)
     payload = Column(JSON, nullable=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 

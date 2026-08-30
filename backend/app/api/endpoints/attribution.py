@@ -1,10 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from datetime import datetime
+import json
 
-from app.models.database import get_db, AttributionAssessmentModel, InvestigationModel
-from app.models.schemas import SensitivityAdjustmentRequest, AttributionAssessment
+from app.models.database import get_db, AttributionAssessmentModel, InvestigationModel, AuditEventModel
+from app.models.schemas import SensitivityAdjustmentRequest, AttributionAssessment, DimensionSignal, GlobalContradiction
 from app.services.fusion_engine import EvidenceFusionEngine
+from app.core.security import require_role
 
 router = APIRouter()
 
@@ -12,11 +14,11 @@ router = APIRouter()
 @router.get("/{investigation_id}")
 def get_attribution_assessment(investigation_id: str, db: Session = Depends(get_db)):
     """
-    Returns the latest fused attribution assessment for the investigation.
+    Returns the latest official fused attribution assessment for the investigation.
     """
     record = db.query(AttributionAssessmentModel).filter(
         AttributionAssessmentModel.investigation_id == investigation_id
-    ).first()
+    ).order_by(AttributionAssessmentModel.created_at.desc()).first()
     
     if not record:
         raise HTTPException(status_code=404, detail="Attribution assessment not found for this investigation")
@@ -28,11 +30,11 @@ def get_attribution_assessment(investigation_id: str, db: Session = Depends(get_
 def recalculate_sensitivity(req: SensitivityAdjustmentRequest, db: Session = Depends(get_db)):
     """
     Dynamic live recalculation for the Sensitivity & Contradiction Tuner in the UI.
-    Normalizes new weights and re-runs the Two-Level Fusion Engine instantly.
+    Returns an ephemeral preview without overwriting the official baseline assessment.
     """
     record = db.query(AttributionAssessmentModel).filter(
         AttributionAssessmentModel.investigation_id == req.investigation_id
-    ).first()
+    ).order_by(AttributionAssessmentModel.created_at.desc()).first()
     
     if not record or not record.payload:
         raise HTTPException(status_code=404, detail="Original assessment not found to tune")
@@ -56,9 +58,6 @@ def recalculate_sensitivity(req: SensitivityAdjustmentRequest, db: Session = Dep
     w_style = req.weight_stylometric / raw_sum
     w_infra = req.weight_infrastructure / raw_sum
     w_beh = req.weight_behavioral / raw_sum
-
-    # Rebuild signals with new weights
-    from app.models.schemas import DimensionSignal, GlobalContradiction
     
     crypto_sig = DimensionSignal(**dims["cryptographic"])
     crypto_sig.configured_weight = round(w_crypto, 4)
@@ -96,4 +95,57 @@ def recalculate_sensitivity(req: SensitivityAdjustmentRequest, db: Session = Dep
         global_contradictions=global_contras
     )
 
-    return updated_assessment.model_dump(mode="json")
+    resp = updated_assessment.model_dump(mode="json")
+    resp["is_preview"] = True
+    resp["preview_notice"] = "Ephemeral sensitivity preview. Use /commit-weights to establish as official assessment."
+    return resp
+
+
+@router.post("/commit-weights")
+def commit_tuned_weights(
+    req: SensitivityAdjustmentRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_role("LEAD_AUDITOR", "CTI_ANALYST"))
+):
+    """
+    Persists tuned weights as the official baseline assessment for an investigation with audit provenance.
+    """
+    record = db.query(AttributionAssessmentModel).filter(
+        AttributionAssessmentModel.investigation_id == req.investigation_id
+    ).order_by(AttributionAssessmentModel.created_at.desc()).first()
+    
+    if not record or not record.payload:
+        raise HTTPException(status_code=404, detail="Original assessment not found to commit")
+
+    preview = recalculate_sensitivity(req, db)
+    preview.pop("is_preview", None)
+    preview.pop("preview_notice", None)
+
+    # Deactivate older assessments
+    db.query(AttributionAssessmentModel).filter(
+        AttributionAssessmentModel.investigation_id == req.investigation_id
+    ).update({"is_current": False})
+
+    new_assessment_id = f"ASSESS-{req.investigation_id}-{datetime.utcnow().strftime('%H%M%S')}"
+    preview["assessment_id"] = new_assessment_id
+
+    db_assess = AttributionAssessmentModel(
+        assessment_id=new_assessment_id,
+        investigation_id=req.investigation_id,
+        attribution_state=preview["attribution_state"],
+        confidence_band=preview["confidence_band"],
+        base_score=preview["base_score"],
+        evidence_score=preview["evidence_score"],
+        real_world_identity="NOT ESTABLISHED",
+        is_current=True,
+        payload=preview,
+        created_at=datetime.utcnow()
+    )
+    db.add(db_assess)
+    db.commit()
+
+    return {
+        "status": "COMMITTED",
+        "message": f"Tuned weights committed by {current_user.get('analyst_id')}",
+        "assessment": preview
+    }

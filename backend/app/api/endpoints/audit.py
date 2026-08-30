@@ -5,15 +5,21 @@ import hashlib
 import json
 
 from app.models.database import get_db, AuditEventModel, AttributionAssessmentModel, InvestigationModel
-from app.models.schemas import AuditDecisionRequest, AuditEvent, AttributionState
+from app.models.schemas import AuditDecisionRequest, AuditEvent
+from app.core.security import require_role
 
 router = APIRouter()
 
 
 @router.post("/decision", response_model=AuditEvent)
-def record_analyst_decision(req: AuditDecisionRequest, db: Session = Depends(get_db)):
+def record_analyst_decision(
+    req: AuditDecisionRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_role("LEAD_AUDITOR", "CTI_ANALYST"))
+):
     """
     Records an append-only, tamper-evident audit record of the analyst's decision.
+    Requires authenticated CTI_ANALYST or LEAD_AUDITOR role.
     """
     assess = db.query(AttributionAssessmentModel).filter(
         AttributionAssessmentModel.assessment_id == req.assessment_id
@@ -22,14 +28,15 @@ def record_analyst_decision(req: AuditDecisionRequest, db: Session = Depends(get
     prior_state = assess.attribution_state if assess else "INCONCLUSIVE"
     resulting_state = prior_state
     if req.action.value == "CONFIRMED":
-        resulting_state = prior_state
+        resulting_state = f"{prior_state} (CONFIRMED_BY_ANALYST)"
     elif req.action.value == "REJECTED":
         resulting_state = "REJECTED_BY_ANALYST"
     elif req.action.value == "INVESTIGATE":
         resulting_state = "UNDER_FURTHER_INVESTIGATION"
 
-    audit_id = f"AUDIT-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}-{req.analyst_id[-4:]}"
+    effective_analyst = req.analyst_id or current_user.get("analyst_id", "ANALYST-001")
     now = datetime.utcnow()
+    audit_id = f"AUDIT-{now.strftime('%Y%m%d%H%M%S%f')}-{effective_analyst[-4:]}"
     
     # Compute immutable event hash
     hash_payload = {
@@ -37,7 +44,7 @@ def record_analyst_decision(req: AuditDecisionRequest, db: Session = Depends(get
         "investigation_id": req.investigation_id,
         "assessment_id": req.assessment_id,
         "action": req.action.value,
-        "analyst_id": req.analyst_id,
+        "analyst_id": effective_analyst,
         "timestamp": now.isoformat(),
         "rationale": req.rationale,
         "prior_state": prior_state,
@@ -50,7 +57,7 @@ def record_analyst_decision(req: AuditDecisionRequest, db: Session = Depends(get
         investigation_id=req.investigation_id,
         assessment_id=req.assessment_id,
         action=req.action.value,
-        analyst_id=req.analyst_id,
+        analyst_id=effective_analyst,
         timestamp=now,
         rationale=req.rationale,
         prior_state=prior_state,
@@ -66,11 +73,11 @@ def record_analyst_decision(req: AuditDecisionRequest, db: Session = Depends(get
         investigation_id=req.investigation_id,
         assessment_id=req.assessment_id,
         action=req.action,
-        analyst_id=req.analyst_id,
+        analyst_id=effective_analyst,
         timestamp=now,
         rationale=req.rationale,
-        prior_state=AttributionState(prior_state) if prior_state in AttributionState.__members__.values() else AttributionState.INCONCLUSIVE,
-        resulting_state=AttributionState(resulting_state) if resulting_state in AttributionState.__members__.values() else AttributionState.INCONCLUSIVE,
+        prior_state=prior_state,
+        resulting_state=resulting_state,
         event_hash=event_hash
     )
 

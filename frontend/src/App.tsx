@@ -10,9 +10,10 @@ import { ContradictionBox } from './components/attribution/ContradictionBox';
 import { SensitivityTuner } from './components/attribution/SensitivityTuner';
 import { AnalystActions } from './components/attribution/AnalystActions';
 import { EvidenceDrawer } from './components/drawer/EvidenceDrawer';
+import { UploadModal } from './components/UploadModal';
 
 export const App: React.FC = () => {
-  const [activeCase, setActiveCase] = useState<'1' | '2'>('1');
+  const [activeCase, setActiveCase] = useState<'1' | '2' | 'custom'>('1');
   const [investigationId, setInvestigationId] = useState('INV-SIH-001');
   const [personaA, setPersonaA] = useState('KryptonGhost');
   const [personaB, setPersonaB] = useState('SpecterOp');
@@ -27,8 +28,49 @@ export const App: React.FC = () => {
   const [progressPct, setProgressPct] = useState(0);
   const [progressMsg, setProgressMsg] = useState('Ready to execute CTI pipeline');
 
+  // Upload modal state
+  const [isUploadOpen, setIsUploadOpen] = useState(false);
+
   const [selectedNodeId, setSelectedNodeId] = useState<string | undefined>();
   const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | undefined>();
+
+  // Run pipeline stream for any investigation
+  const startPipelineStream = (invId: string) => {
+    setIsProcessing(true);
+    setProgressStage('EVIDENCE_INGESTION');
+    setProgressPct(15);
+    setProgressMsg('Initiating real-time analytical pipeline stream...');
+
+    api.subscribeToPipeline(
+      invId,
+      (progressEvent) => {
+        setProgressStage(progressEvent.stage);
+        setProgressPct(progressEvent.progress_percentage);
+        setProgressMsg(progressEvent.message);
+      },
+      async (completedAssessment) => {
+        setAssessment(completedAssessment);
+        setPersonaA(completedAssessment.target_persona_a);
+        setPersonaB(completedAssessment.target_persona_b);
+        setProgressStage('COMPLETE');
+        setProgressPct(100);
+        setProgressMsg(`Attribution finalized: ${completedAssessment.attribution_state} (Score: ${completedAssessment.evidence_score})`);
+        setIsProcessing(false);
+
+        // Fetch property graph data
+        try {
+          const gRes = await api.getGraph(invId);
+          setGraphData(gRes.graph);
+        } catch (e) {
+          console.error('Failed to load graph payload', e);
+        }
+      },
+      (err) => {
+        console.error('Pipeline SSE stream error', err);
+        setIsProcessing(false);
+      }
+    );
+  };
 
   // Load benchmark case and trigger pipeline
   const runCase = async (caseNum: string) => {
@@ -39,41 +81,24 @@ export const App: React.FC = () => {
     setProgressMsg(`Loading Benchmark Case ${caseNum} into Evidence Ingestion Layer...`);
 
     try {
-      // 1. Ingest benchmark into backend
       const loadRes = await api.loadBenchmark(caseNum);
       setInvestigationId(loadRes.investigation_id);
       setPersonaA(loadRes.persona_a);
       setPersonaB(loadRes.persona_b);
       setArtifacts(loadRes.artifacts || []);
 
-      // 2. Subscribe to live pipeline SSE stream
-      api.subscribeToPipeline(
-        loadRes.investigation_id,
-        (progressEvent) => {
-          setProgressStage(progressEvent.stage);
-          setProgressPct(progressEvent.progress_percentage);
-          setProgressMsg(progressEvent.message);
-        },
-        async (completedAssessment) => {
-          setAssessment(completedAssessment);
-          setProgressStage('COMPLETE');
-          setProgressPct(100);
-          setProgressMsg(`Attribution finalized: ${completedAssessment.attribution_state}`);
-          setIsProcessing(false);
-
-          // Fetch graph data
-          const gRes = await api.getGraph(loadRes.investigation_id);
-          setGraphData(gRes.graph);
-        },
-        (err) => {
-          console.error('Pipeline SSE error', err);
-          setIsProcessing(false);
-        }
-      );
+      startPipelineStream(loadRes.investigation_id);
     } catch (err) {
       console.error('Failed to load benchmark', err);
       setIsProcessing(false);
     }
+  };
+
+  // Handle uploaded custom package
+  const handleUploadSuccess = async (newInvId: string) => {
+    setActiveCase('custom');
+    setInvestigationId(newInvId);
+    startPipelineStream(newInvId);
   };
 
   useEffect(() => {
@@ -149,7 +174,7 @@ export const App: React.FC = () => {
         activeCase={activeCase}
         onSelectCase={runCase}
         onExport={handleExportDossier}
-        onOpenUpload={() => alert('Custom evidence package upload modal')}
+        onOpenUpload={() => setIsUploadOpen(true)}
         isProcessing={isProcessing}
       />
 
@@ -216,6 +241,13 @@ export const App: React.FC = () => {
       <EvidenceDrawer
         artifacts={artifacts}
         selectedEvidenceId={selectedEvidenceId}
+      />
+
+      {/* Live Evidence Ingestion Modal */}
+      <UploadModal
+        isOpen={isUploadOpen}
+        onClose={() => setIsUploadOpen(false)}
+        onUploadSuccess={handleUploadSuccess}
       />
     </div>
   );

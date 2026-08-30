@@ -1,8 +1,36 @@
-from typing import List, Dict, Any, Tuple
+import logging
+from typing import List, Dict, Any, Tuple, Optional
 from app.models.schemas import DimensionSignal, SignalStatus
+from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class GraphEngine:
+    _neo4j_driver = None
+    _neo4j_checked = False
+
+    @classmethod
+    def _get_neo4j_driver(cls):
+        if cls._neo4j_checked:
+            return cls._neo4j_driver
+        cls._neo4j_checked = True
+        try:
+            from neo4j import GraphDatabase
+            driver = GraphDatabase.driver(
+                settings.NEO4J_URI,
+                auth=(settings.NEO4J_USER, settings.NEO4J_PASSWORD)
+            )
+            # Verify connectivity
+            driver.verify_connectivity()
+            cls._neo4j_driver = driver
+            logger.info("Successfully connected to Neo4j Property Graph.")
+            return cls._neo4j_driver
+        except Exception as e:
+            logger.warning(f"Neo4j not reachable ({str(e)}). Using local property graph generator.")
+            cls._neo4j_driver = None
+            return None
+
     @classmethod
     def analyze_cryptographic_and_infra(
         cls,
@@ -93,6 +121,53 @@ class GraphEngine:
         return crypto_signal, infra_signal
 
     @classmethod
+    def sync_to_neo4j(cls, investigation_id: str, persona_a: str, persona_b: str, artifacts: List[Dict[str, Any]]):
+        """
+        Persists nodes and relationships into Neo4j via Cypher when available.
+        """
+        driver = cls._get_neo4j_driver()
+        if not driver:
+            return False
+
+        try:
+            with driver.session() as session:
+                # Merge Personas
+                session.run(
+                    "MERGE (p1:Persona {id: $p1, label: $p1, investigation_id: $inv}) "
+                    "MERGE (p2:Persona {id: $p2, label: $p2, investigation_id: $inv})",
+                    p1=persona_a, p2=persona_b, inv=investigation_id
+                )
+                for art in artifacts:
+                    art_type = art.get("artifact_type")
+                    raw = art.get("raw_payload", {})
+                    eid = art.get("evidence_id", "EV-UNKNOWN")
+                    
+                    if art_type == "PGP_KEY":
+                        key_id = raw.get("key_id", "UNKNOWN")
+                        persona = raw.get("persona", persona_a)
+                        session.run(
+                            "MERGE (k:PGP_Key {id: $key_id, fingerprint: $fp}) "
+                            "MERGE (p:Persona {id: $persona}) "
+                            "MERGE (p)-[:USED {evidence_id: $eid}]->(k)",
+                            key_id=key_id, fp=raw.get("key_fingerprint", ""), persona=persona, eid=eid
+                        )
+                    elif art_type == "FORUM_POST":
+                        forum = raw.get("forum", "Darknet_Forum")
+                        persona = raw.get("persona", persona_a)
+                        session.run(
+                            "MERGE (f:Forum {id: $forum, name: $forum}) "
+                            "MERGE (post:Forum_Post {id: $eid, word_count: $wc}) "
+                            "MERGE (p:Persona {id: $persona}) "
+                            "MERGE (p)-[:AUTHORED {evidence_id: $eid}]->(post) "
+                            "MERGE (post)-[:POSTED_ON]->(f)",
+                            forum=forum, eid=eid, wc=raw.get("word_count", 0), persona=persona
+                        )
+            return True
+        except Exception as e:
+            logger.warning(f"Neo4j sync failed ({str(e)})")
+            return False
+
+    @classmethod
     def generate_cytoscape_graph(
         cls,
         investigation_id: str,
@@ -104,18 +179,23 @@ class GraphEngine:
     ) -> Dict[str, Any]:
         """
         Builds a comprehensive Cytoscape.js compatible graph payload with typed nodes and evidentiary edges.
+        Includes graph_source metadata indicating NEO4J_PROPERTY_GRAPH or LOCAL_FALLBACK.
         """
+        neo4j_synced = cls.sync_to_neo4j(investigation_id, persona_a, persona_b, artifacts)
+        graph_source = "NEO4J_PROPERTY_GRAPH" if neo4j_synced else "LOCAL_FALLBACK"
+
         nodes = []
         edges = []
 
-        # Persona Nodes
+        # Persona Nodes with dynamic centrality/threat level
+        threat_level = "CRITICAL" if attribution_state == "CONFIRMED_LINK" else ("EVALUATING" if hard_gate_triggered else "HIGH")
         nodes.append({
             "data": {
                 "id": persona_a,
                 "label": persona_a,
                 "type": "Persona",
-                "risk": "HIGH",
-                "centrality": 0.85
+                "risk": threat_level,
+                "centrality": round(0.50 + min(len(artifacts) * 0.05, 0.45), 2)
             }
         })
         nodes.append({
@@ -123,8 +203,8 @@ class GraphEngine:
                 "id": persona_b,
                 "label": persona_b,
                 "type": "Persona",
-                "risk": "HIGH",
-                "centrality": 0.78
+                "risk": threat_level,
+                "centrality": round(0.45 + min(len(artifacts) * 0.05, 0.45), 2)
             }
         })
 
@@ -146,7 +226,7 @@ class GraphEngine:
                             "fingerprint": raw.get("key_fingerprint")
                         }
                     })
-                # Edge
+                # Edge to specific persona
                 persona = raw.get("persona", persona_a)
                 edges.append({
                     "data": {
@@ -180,15 +260,32 @@ class GraphEngine:
 
             elif art_type == "BTC_TRANSACTION":
                 cluster_id = raw.get("cluster_id", "BTC_CLUSTER")
-                nodes.append({
-                    "data": {"id": cluster_id, "label": f"Wallet: {cluster_id}", "type": "Wallet", "method": raw.get("clustering_method")}
-                })
-                edges.append({
-                    "data": {"id": f"e_{persona_a}_{cluster_id}", "source": persona_a, "target": cluster_id, "label": "ASSOCIATED_WITH", "evidence_id": eid}
-                })
-                edges.append({
-                    "data": {"id": f"e_{persona_b}_{cluster_id}", "source": persona_b, "target": cluster_id, "label": "ASSOCIATED_WITH", "evidence_id": eid}
-                })
+                if not any(n["data"]["id"] == cluster_id for n in nodes):
+                    nodes.append({
+                        "data": {"id": cluster_id, "label": f"Wallet: {cluster_id}", "type": "Wallet", "method": raw.get("clustering_method")}
+                    })
+                
+                # Precise wallet relationships:
+                # Link Persona A if inputs belong to Persona A or explicit persona tag
+                inputs = raw.get("inputs", [])
+                outputs = raw.get("outputs", [])
+                
+                if any(persona_a.lower() in str(inp).lower() for inp in inputs) or raw.get("persona") == persona_a:
+                    edges.append({
+                        "data": {"id": f"e_{persona_a}_{cluster_id}", "source": persona_a, "target": cluster_id, "label": "FUNDED_FROM", "evidence_id": eid}
+                    })
+                else:
+                    # Default associated if part of persona A telemetry
+                    edges.append({
+                        "data": {"id": f"e_{persona_a}_{cluster_id}", "source": persona_a, "target": cluster_id, "label": "ASSOCIATED_WITH", "evidence_id": eid}
+                    })
+
+                # Only link Persona B if Persona B is in outputs or explicitly associated
+                if any(persona_b.lower() in str(out).lower() for out in outputs) or raw.get("recipient_persona") == persona_b:
+                    edges.append({
+                        "data": {"id": f"e_{cluster_id}_{persona_b}", "source": cluster_id, "target": persona_b, "label": "TRANSFERRED_TO", "evidence_id": eid}
+                    })
+
                 # VASP Hops
                 for hop in raw.get("hops_to_vasp", []):
                     vasp = hop.get("vasp_entity")
@@ -227,4 +324,8 @@ class GraphEngine:
                 }
             })
 
-        return {"nodes": nodes, "edges": edges}
+        return {
+            "graph_source": graph_source,
+            "nodes": nodes,
+            "edges": edges
+        }

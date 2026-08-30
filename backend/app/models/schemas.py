@@ -43,11 +43,20 @@ class AttributionState(str, Enum):
     LIKELY_DIFFERENT = "LIKELY_DIFFERENT"
 
 
-class AnalystAction(str, Enum):
+class AnalystDecision(str, Enum):
     PENDING = "PENDING"
     CONFIRMED = "CONFIRMED"
     REJECTED = "REJECTED"
     INVESTIGATE = "INVESTIGATE"
+
+
+# Alias for backward compatibility
+AnalystAction = AnalystDecision
+
+
+class StylometryEngineType(str, Enum):
+    TRANSFORMER = "TRANSFORMER"
+    DETERMINISTIC_FALLBACK = "DETERMINISTIC_FALLBACK"
 
 
 # --- Evidence Ingestion & Provenance Models ---
@@ -152,7 +161,7 @@ class SensitivityAdjustmentRequest(BaseModel):
 class AuditDecisionRequest(BaseModel):
     investigation_id: str
     assessment_id: str
-    action: AnalystAction
+    action: AnalystDecision
     analyst_id: str
     rationale: str
 
@@ -161,12 +170,12 @@ class AuditEvent(BaseModel):
     audit_id: str
     investigation_id: str
     assessment_id: str
-    action: AnalystAction
+    action: AnalystDecision
     analyst_id: str
     timestamp: datetime
     rationale: str
-    prior_state: AttributionState
-    resulting_state: AttributionState
+    prior_state: str = Field(..., description="Prior algorithmic attribution state (e.g. LIKELY_LINK)")
+    resulting_state: str = Field(..., description="Resulting operational state (e.g. CONFIRMED, REJECTED)")
     event_hash: str = Field(..., description="Cryptographic SHA-256 fingerprint of the audit record")
 
 

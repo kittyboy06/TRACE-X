@@ -96,4 +96,4 @@ def recalculate_sensitivity(req: SensitivityAdjustmentRequest, db: Session = Dep
         global_contradictions=global_contras
     )
 
-    return updated_assessment.model_dump()
+    return updated_assessment.model_dump(mode="json")

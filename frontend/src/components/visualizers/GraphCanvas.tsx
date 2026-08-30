@@ -3,6 +3,16 @@ import cytoscape from 'cytoscape';
 import { CytoscapeGraphData } from '../../types';
 import { Filter, ZoomIn, ZoomOut, RefreshCw, Layers } from 'lucide-react';
 
+import { 
+  PERSONA_SVG, 
+  PGP_KEY_SVG, 
+  WALLET_SVG, 
+  VASP_SVG, 
+  FORUM_SVG, 
+  FORUM_POST_SVG, 
+  INFRASTRUCTURE_SVG 
+} from '../../utils/graphIcons';
+
 interface GraphCanvasProps {
   data: CytoscapeGraphData;
   onSelectNode?: (nodeId: string) => void;
@@ -42,86 +52,111 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onSelectNode }) 
       container: containerRef.current,
       elements: [...filteredNodes, ...filteredEdges],
       style: [
-        // Base Node Style
+        // Base Node Style with Compact Card Labeling
         {
           selector: 'node',
           style: {
             'label': 'data(label)',
-            'color': '#cbd5e1',
+            'color': '#e2e8f0',
             'font-family': 'JetBrains Mono, monospace',
-            'font-size': '11px',
+            'font-size': '8.5px',
             'text-valign': 'bottom',
-            'text-margin-y': 5,
-            'background-color': '#334155',
-            'border-width': 2,
-            'border-color': '#64748b',
-            'width': 36,
-            'height': 36
+            'text-margin-y': 6,
+            'text-background-color': '#020617',
+            'text-background-opacity': 0.95,
+            'text-background-padding': '3px',
+            'text-background-shape': 'roundrectangle',
+            'text-border-color': '#334155',
+            'text-border-width': 1,
+            'text-max-width': '85px',
+            'text-wrap': 'ellipsis',
+            'background-fit': 'contain',
+            'background-opacity': 0,
+            'border-width': 0,
+            'width': 30,
+            'height': 30
           }
         },
-        // Persona Node
+        // 1. Persona SVG Node (Clean 38px)
         {
           selector: 'node[type = "Persona"]',
           style: {
-            'background-color': '#06b6d4',
-            'border-color': '#22d3ee',
-            'border-width': 3,
-            'width': 48,
-            'height': 48,
+            'background-image': PERSONA_SVG,
+            'width': 38,
+            'height': 38,
             'color': '#38bdf8',
             'font-weight': 'bold',
-            'font-size': '12px'
+            'font-size': '9.5px',
+            'text-border-color': '#0284c7',
+            'text-border-width': 1.5,
+            'z-index': 10
           }
         },
-        // PGP Key Node
+        // 2. PGP Key SVG Node (30px)
         {
           selector: 'node[type = "PGP_Key"]',
           style: {
-            'background-color': '#0284c7',
-            'border-color': '#38bdf8',
-            'shape': 'diamond',
-            'width': 38,
-            'height': 38
+            'background-image': PGP_KEY_SVG,
+            'width': 30,
+            'height': 30,
+            'color': '#7dd3fc',
+            'font-size': '8px'
           }
         },
-        // Wallet Node
+        // 3. Crypto Wallet SVG Node (32px)
         {
           selector: 'node[type = "Wallet"]',
           style: {
-            'background-color': '#059669',
-            'border-color': '#34d399',
-            'shape': 'hexagon',
-            'width': 40,
-            'height': 40
+            'background-image': WALLET_SVG,
+            'width': 32,
+            'height': 32,
+            'color': '#6ee7b7',
+            'font-size': '8px'
           }
         },
-        // VASP Node
+        // 4. VASP Exchange SVG Node (34x28px)
         {
           selector: 'node[type = "VASP"]',
           style: {
-            'background-color': '#d97706',
-            'border-color': '#fbbf24',
-            'shape': 'round-rectangle',
-            'width': 44,
-            'height': 32
+            'background-image': VASP_SVG,
+            'width': 34,
+            'height': 28,
+            'color': '#fcd34d',
+            'font-size': '8px'
           }
         },
-        // Forum & Post Nodes
+        // 5. Forum Darknet Hub SVG Node (32px)
         {
           selector: 'node[type = "Forum"]',
           style: {
-            'background-color': '#7c3aed',
-            'border-color': '#a78bfa',
-            'shape': 'rectangle'
+            'background-image': FORUM_SVG,
+            'width': 32,
+            'height': 32,
+            'color': '#d8b4fe',
+            'font-size': '9px',
+            'font-weight': 'bold'
           }
         },
+        // 6. Forum Post SVG Node (Compact 22px)
         {
           selector: 'node[type = "Forum_Post"]',
           style: {
-            'background-color': '#475569',
-            'border-color': '#94a3b8',
-            'width': 28,
-            'height': 28
+            'background-image': FORUM_POST_SVG,
+            'width': 22,
+            'height': 22,
+            'color': '#94a3b8',
+            'font-size': '7.5px'
+          }
+        },
+        // 7. Infrastructure SVG Node (32px)
+        {
+          selector: 'node[type = "Infrastructure"]',
+          style: {
+            'background-image': INFRASTRUCTURE_SVG,
+            'width': 32,
+            'height': 32,
+            'color': '#fdba74',
+            'font-size': '8px'
           }
         },
         // Base Edge Style
@@ -136,11 +171,14 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onSelectNode }) 
             'label': 'data(label)',
             'color': '#94a3b8',
             'font-family': 'JetBrains Mono, monospace',
-            'font-size': '9px',
+            'font-size': '7.5px',
             'text-rotation': 'autorotate',
-            'text-background-color': '#090d16',
-            'text-background-opacity': 0.8,
-            'text-background-padding': '2px'
+            'text-background-color': '#020617',
+            'text-background-opacity': 0.95,
+            'text-background-padding': '2px',
+            'text-background-shape': 'roundrectangle',
+            'text-border-color': '#334155',
+            'text-border-width': 1
           }
         },
         // Evidentiary Strength Edges
@@ -149,7 +187,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onSelectNode }) 
           style: {
             'line-color': '#38bdf8',
             'target-arrow-color': '#38bdf8',
-            'width': 3.5,
+            'width': 3,
             'line-style': 'solid'
           }
         },
@@ -158,7 +196,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onSelectNode }) 
           style: {
             'line-color': '#f43f5e',
             'target-arrow-color': '#f43f5e',
-            'width': 3,
+            'width': 2.5,
             'line-style': 'dashed'
           }
         },
@@ -167,17 +205,34 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onSelectNode }) 
           style: {
             'line-color': '#06b6d4',
             'target-arrow-color': '#06b6d4',
-            'width': 4,
+            'width': 3.5,
             'line-style': 'solid'
+          }
+        },
+        {
+          selector: 'edge[label = "CONFLICTS_WITH"]',
+          style: {
+            'line-color': '#f43f5e',
+            'target-arrow-color': '#f43f5e',
+            'width': 3,
+            'line-style': 'dashed'
           }
         }
       ],
       layout: {
         name: 'cose',
         animate: false,
-        padding: 40,
-        nodeRepulsion: () => 4500,
-        idealEdgeLength: () => 100
+        padding: 60,
+        nodeDimensionsIncludeLabels: true,
+        nodeRepulsion: () => 800000,
+        idealEdgeLength: () => 220,
+        edgeElasticity: () => 32,
+        nestingFactor: 0.1,
+        gravity: 0.1,
+        numIter: 2500,
+        initialTemp: 200,
+        coolingFactor: 0.95,
+        minTemp: 1.0
       }
     });
 

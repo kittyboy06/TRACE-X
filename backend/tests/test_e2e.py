@@ -58,6 +58,12 @@ def test_e2e_case_1_convergence():
     assert recalc_res.status_code == 200
     assert "attribution_state" in recalc_res.json()
 
+    # 5. Verify SSE stream endpoint completes without serialization errors
+    stream_res = client.get("/api/v1/pipeline/stream/INV-SIH-001")
+    assert stream_res.status_code == 200
+    assert "COMPLETE" in stream_res.text
+    assert "data:" in stream_res.text
+
 
 def test_e2e_case_2_contradiction_clash():
     # 1. Load Benchmark Case 2

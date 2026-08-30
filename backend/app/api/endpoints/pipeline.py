@@ -165,7 +165,7 @@ async def stream_pipeline_progress(investigation_id: str):
                 "stage": "COMPLETE",
                 "progress_percentage": 100,
                 "message": f"Attribution Complete: {res['assessment'].attribution_state.value} (Score: {res['assessment'].evidence_score})",
-                "assessment": res["assessment"].model_dump()
+                "assessment": res["assessment"].model_dump(mode="json")
             }
             yield f"data: {json.dumps(completion_payload)}\n\n"
         finally:

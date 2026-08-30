@@ -15,7 +15,7 @@ def auth_headers():
     return {"Authorization": f"Bearer {token}"}
 
 
-def test_graph_generation_and_source(auth_headers):
+def test_graph_generation_and_metrics(auth_headers):
     # 1. Load benchmark 1 (Protected)
     bench_resp = client.post("/api/v1/ingestion/benchmark/1", headers=auth_headers)
     assert bench_resp.status_code == 200
@@ -38,6 +38,12 @@ def test_graph_generation_and_source(auth_headers):
     assert "Persona" in node_types
     assert "PGP_Key" in node_types
     assert "Wallet" in node_types
+
+    # Verify calculated degree centrality on nodes
+    for node in graph["nodes"]:
+        assert "degree_centrality" in node["data"]
+        assert 0.0 <= node["data"]["degree_centrality"] <= 1.0
+        assert "risk" in node["data"]
 
     # Verify edge labels
     edge_labels = [e["data"]["label"] for e in graph["edges"]]

@@ -372,7 +372,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
                 <span>Ingesting Evidence...</span>
               ) : (
                 <>
-                  <span>Ingest & Launch Pipeline</span>
+                  <span>Ingest & Analyze</span>
                   <ArrowRight className="w-3.5 h-3.5" />
                 </>
               )}

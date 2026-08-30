@@ -6,6 +6,66 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 
+def _compute_and_attach_graph_metrics(
+    nodes_dict: Dict[str, Any],
+    edges_dict: Dict[str, Any],
+    attribution_state: str,
+    hard_gate_triggered: bool
+):
+    """
+    Computes genuine degree centrality, directional degree metrics, and threat risk levels
+    based on the actual topology of the graph.
+    """
+    degrees = {nid: 0 for nid in nodes_dict}
+    in_degrees = {nid: 0 for nid in nodes_dict}
+    out_degrees = {nid: 0 for nid in nodes_dict}
+
+    for edge in edges_dict.values():
+        src = edge["data"]["source"]
+        tgt = edge["data"]["target"]
+        if src in degrees:
+            degrees[src] += 1
+            out_degrees[src] += 1
+        if tgt in degrees:
+            degrees[tgt] += 1
+            in_degrees[tgt] += 1
+
+    total_nodes = len(nodes_dict)
+    denom = max(total_nodes - 1, 1)
+
+    for nid, node in nodes_dict.items():
+        deg = degrees.get(nid, 0)
+        centrality = round(deg / denom, 3)
+        node["data"]["degree_centrality"] = centrality
+        node["data"]["centrality"] = centrality  # For backward-compatible UI widgets
+        node["data"]["in_degree"] = in_degrees.get(nid, 0)
+        node["data"]["out_degree"] = out_degrees.get(nid, 0)
+        node["data"]["degree"] = deg
+
+        # Dynamic risk score based on connectivity and node type
+        ntype = node["data"].get("type", "Node")
+        if ntype == "Persona":
+            if attribution_state == "CONFIRMED_LINK":
+                node["data"]["risk"] = "CRITICAL"
+                node["data"]["threat_score"] = round(min(0.85 + centrality * 0.15, 1.0), 2)
+            elif hard_gate_triggered:
+                node["data"]["risk"] = "CONTRADICTORY"
+                node["data"]["threat_score"] = 0.20
+            else:
+                node["data"]["risk"] = "HIGH" if centrality >= 0.25 else "EVALUATING"
+                node["data"]["threat_score"] = round(min(0.50 + centrality * 0.40, 0.95), 2)
+        elif ntype == "PGP_Key":
+            node["data"]["risk"] = "CRITICAL" if deg >= 2 else "HIGH"
+        elif ntype == "Wallet":
+            node["data"]["risk"] = "HIGH" if deg >= 2 else "MEDIUM"
+        elif ntype == "Infrastructure":
+            node["data"]["risk"] = "HIGH" if deg >= 2 else "MEDIUM"
+        elif ntype == "VASP":
+            node["data"]["risk"] = "IDENTIFIED_ENTITY"
+        else:
+            node["data"]["risk"] = "INFORMATIONAL"
+
+
 class GraphEngine:
     _neo4j_driver = None
     _neo4j_checked = False
@@ -220,21 +280,21 @@ class GraphEngine:
                             "MERGE (i:Infrastructure {id: $iid, label: $ilbl, type: 'Infrastructure'})",
                             iid=infra_id, ilbl=f"Infra: {raw.get('persona_a_infra', {}).get('ssh_banner', 'SSH-Daemon')[:16]}"
                         )
-                        # Connect Persona A only if telemetry present
+                        # Connect Persona A with distinct evidence context
                         if "persona_a_infra" in raw or raw.get("persona") == persona_a:
                             session.run(
                                 "MERGE (p1:Persona {id: $pa}) MERGE (i:Infrastructure {id: $iid}) "
                                 "MERGE (p1)-[:RUNS_ON {evidence_id: $eid, association: $assoc, evidence_strength: $str}]->(i)",
-                                pa=persona_a, iid=infra_id, eid=eid,
+                                pa=persona_a, iid=infra_id, eid=f"{eid}-A",
                                 assoc="VERIFIED_INFRASTRUCTURE" if rare_match else "INFERRED_INFRASTRUCTURE",
                                 str="HIGH" if rare_match else "MEDIUM"
                             )
-                        # Connect Persona B only if telemetry present
+                        # Connect Persona B with distinct evidence context
                         if "persona_b_infra" in raw or raw.get("persona") == persona_b:
                             session.run(
                                 "MERGE (p2:Persona {id: $pb}) MERGE (i:Infrastructure {id: $iid}) "
                                 "MERGE (p2)-[:RUNS_ON {evidence_id: $eid, association: $assoc, evidence_strength: $str}]->(i)",
-                                pb=persona_b, iid=infra_id, eid=eid,
+                                pb=persona_b, iid=infra_id, eid=f"{eid}-B",
                                 assoc="VERIFIED_INFRASTRUCTURE" if rare_match else "INFERRED_INFRASTRUCTURE",
                                 str="HIGH" if rare_match else "MEDIUM"
                             )
@@ -262,10 +322,12 @@ class GraphEngine:
         cls,
         investigation_id: str,
         persona_a: str,
-        persona_b: str
+        persona_b: str,
+        attribution_state: str = "INCONCLUSIVE",
+        hard_gate_triggered: bool = False
     ) -> Optional[Dict[str, Any]]:
         """
-        Executes Cypher MATCH queries against Neo4j to build the Cytoscape visualization payload from real database records.
+        Executes Cypher MATCH queries against Neo4j and computes degree centrality across the returned topology.
         """
         driver = cls._get_neo4j_driver()
         if not driver:
@@ -296,9 +358,7 @@ class GraphEngine:
                                 "data": {
                                     "id": pid,
                                     "label": p.get("label", pid),
-                                    "type": "Persona",
-                                    "risk": "HIGH",
-                                    "centrality": 0.85
+                                    "type": "Persona"
                                 }
                             }
 
@@ -336,6 +396,7 @@ class GraphEngine:
                             }
 
                 if nodes_dict:
+                    _compute_and_attach_graph_metrics(nodes_dict, edges_dict, attribution_state, hard_gate_triggered)
                     return {
                         "graph_source": "NEO4J_PROPERTY_GRAPH",
                         "nodes": list(nodes_dict.values()),
@@ -359,32 +420,28 @@ class GraphEngine:
         evidence_ids: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """
-        Deterministic, local property graph constructor with honest evidence semantics.
+        Deterministic, local property graph constructor with honest evidence semantics and real degree centrality metrics.
         """
-        nodes = []
-        edges = []
+        nodes_dict = {}
+        edges_dict = {}
+
         actual_aid = assessment_id or f"ASSESS-{investigation_id}"
         actual_eids = evidence_ids or [a.get("evidence_id", "") for a in artifacts if a.get("evidence_id")]
 
-        threat_level = "CRITICAL" if attribution_state == "CONFIRMED_LINK" else ("EVALUATING" if hard_gate_triggered else "HIGH")
-        nodes.append({
+        nodes_dict[persona_a] = {
             "data": {
                 "id": persona_a,
                 "label": persona_a,
-                "type": "Persona",
-                "risk": threat_level,
-                "centrality": round(0.50 + min(len(artifacts) * 0.05, 0.45), 2)
+                "type": "Persona"
             }
-        })
-        nodes.append({
+        }
+        nodes_dict[persona_b] = {
             "data": {
                 "id": persona_b,
                 "label": persona_b,
-                "type": "Persona",
-                "risk": threat_level,
-                "centrality": round(0.45 + min(len(artifacts) * 0.05, 0.45), 2)
+                "type": "Persona"
             }
-        })
+        }
 
         for art in artifacts:
             art_type = art.get("artifact_type")
@@ -394,8 +451,8 @@ class GraphEngine:
             if art_type == "PGP_KEY":
                 key_id = raw.get("key_id", "PGP_UNKNOWN")
                 key_node_id = f"PGP_{key_id}"
-                if not any(n["data"]["id"] == key_node_id for n in nodes):
-                    nodes.append({
+                if key_node_id not in nodes_dict:
+                    nodes_dict[key_node_id] = {
                         "data": {
                             "id": key_node_id,
                             "label": f"PGP: {key_id}",
@@ -403,11 +460,12 @@ class GraphEngine:
                             "fingerprint": raw.get("key_fingerprint"),
                             "evidence_id": eid
                         }
-                    })
+                    }
                 persona = raw.get("persona", persona_a)
-                edges.append({
+                e_id = f"e_{persona}_{key_node_id}"
+                edges_dict[e_id] = {
                     "data": {
-                        "id": f"e_{persona}_{key_node_id}",
+                        "id": e_id,
                         "source": persona,
                         "target": key_node_id,
                         "label": "USED",
@@ -415,17 +473,17 @@ class GraphEngine:
                         "evidence_strength": "VERY_HIGH",
                         "evidence_id": eid
                     }
-                })
+                }
 
             elif art_type == "FORUM_POST":
                 forum = raw.get("forum", "Darknet_Forum")
                 forum_node_id = f"FORUM_{forum}"
-                if not any(n["data"]["id"] == forum_node_id for n in nodes):
-                    nodes.append({
+                if forum_node_id not in nodes_dict:
+                    nodes_dict[forum_node_id] = {
                         "data": {"id": forum_node_id, "label": forum, "type": "Forum"}
-                    })
+                    }
                 post_node_id = f"POST_{eid}"
-                nodes.append({
+                nodes_dict[post_node_id] = {
                     "data": {
                         "id": post_node_id,
                         "label": f"Post ({forum})",
@@ -433,29 +491,32 @@ class GraphEngine:
                         "words": raw.get("word_count"),
                         "evidence_id": eid
                     }
-                })
+                }
                 persona = raw.get("persona", persona_a)
-                edges.append({
-                    "data": {"id": f"e_{persona}_{post_node_id}", "source": persona, "target": post_node_id, "label": "AUTHORED", "association": "VERIFIED_AUTHOR", "evidence_id": eid}
-                })
-                edges.append({
-                    "data": {"id": f"e_{post_node_id}_{forum_node_id}", "source": post_node_id, "target": forum_node_id, "label": "POSTED_ON"}
-                })
+                e_auth = f"e_{persona}_{post_node_id}"
+                edges_dict[e_auth] = {
+                    "data": {"id": e_auth, "source": persona, "target": post_node_id, "label": "AUTHORED", "association": "VERIFIED_AUTHOR", "evidence_id": eid}
+                }
+                e_post = f"e_{post_node_id}_{forum_node_id}"
+                edges_dict[e_post] = {
+                    "data": {"id": e_post, "source": post_node_id, "target": forum_node_id, "label": "POSTED_ON"}
+                }
 
             elif art_type == "BTC_TRANSACTION":
                 cluster_id = raw.get("cluster_id", "BTC_CLUSTER")
-                if not any(n["data"]["id"] == cluster_id for n in nodes):
-                    nodes.append({
+                if cluster_id not in nodes_dict:
+                    nodes_dict[cluster_id] = {
                         "data": {"id": cluster_id, "label": f"Wallet: {cluster_id}", "type": "Wallet", "method": raw.get("clustering_method"), "evidence_id": eid}
-                    })
+                    }
                 
                 inputs = raw.get("inputs", [])
                 outputs = raw.get("outputs", [])
                 
                 if any(persona_a.lower() in str(inp).lower() for inp in inputs) or raw.get("persona") == persona_a:
-                    edges.append({
+                    e_fund = f"e_{persona_a}_{cluster_id}"
+                    edges_dict[e_fund] = {
                         "data": {
-                            "id": f"e_{persona_a}_{cluster_id}",
+                            "id": e_fund,
                             "source": persona_a,
                             "target": cluster_id,
                             "label": "FUNDED_FROM",
@@ -463,11 +524,12 @@ class GraphEngine:
                             "evidence_strength": "HIGH",
                             "evidence_id": eid
                         }
-                    })
+                    }
                 else:
-                    edges.append({
+                    e_assoc = f"e_{persona_a}_{cluster_id}"
+                    edges_dict[e_assoc] = {
                         "data": {
-                            "id": f"e_{persona_a}_{cluster_id}",
+                            "id": e_assoc,
                             "source": persona_a,
                             "target": cluster_id,
                             "label": "ASSOCIATED_WITH",
@@ -475,12 +537,13 @@ class GraphEngine:
                             "evidence_strength": "MEDIUM_HEURISTIC",
                             "evidence_id": eid
                         }
-                    })
+                    }
 
                 if any(persona_b.lower() in str(out).lower() for out in outputs) or raw.get("recipient_persona") == persona_b:
-                    edges.append({
+                    e_tx = f"e_{cluster_id}_{persona_b}"
+                    edges_dict[e_tx] = {
                         "data": {
-                            "id": f"e_{cluster_id}_{persona_b}",
+                            "id": e_tx,
                             "source": cluster_id,
                             "target": persona_b,
                             "label": "TRANSFERRED_TO",
@@ -488,57 +551,61 @@ class GraphEngine:
                             "evidence_strength": "HIGH",
                             "evidence_id": eid
                         }
-                    })
+                    }
 
                 for hop in raw.get("hops_to_vasp", []):
                     vasp = hop.get("vasp_entity")
                     if vasp:
                         vasp_id = f"VASP_{vasp.replace(' ', '_')}"
-                        if not any(n["data"]["id"] == vasp_id for n in nodes):
-                            nodes.append({"data": {"id": vasp_id, "label": vasp, "type": "VASP"}})
-                        edges.append({
-                            "data": {"id": f"e_{cluster_id}_{vasp_id}", "source": cluster_id, "target": vasp_id, "label": "TOUCHES_VASP", "amount_btc": hop.get("amount_btc")}
-                        })
+                        if vasp_id not in nodes_dict:
+                            nodes_dict[vasp_id] = {"data": {"id": vasp_id, "label": vasp, "type": "VASP"}}
+                        e_vasp = f"e_{cluster_id}_{vasp_id}"
+                        edges_dict[e_vasp] = {
+                            "data": {"id": e_vasp, "source": cluster_id, "target": vasp_id, "label": "TOUCHES_VASP", "amount_btc": hop.get("amount_btc")}
+                        }
 
             elif art_type == "INFRASTRUCTURE_HEADER":
                 infra_id = f"INFRA_{eid}"
                 rare_match = raw.get("rare_fingerprint_match", False)
-                if not any(n["data"]["id"] == infra_id for n in nodes):
-                    nodes.append({
+                if infra_id not in nodes_dict:
+                    nodes_dict[infra_id] = {
                         "data": {"id": infra_id, "label": f"Infra: {raw.get('persona_a_infra', {}).get('ssh_banner', 'SSH-Daemon')[:16]}", "type": "Infrastructure", "evidence_id": eid}
-                    })
+                    }
                 
                 # Attach to Persona A only if telemetry present
                 if "persona_a_infra" in raw or raw.get("persona") == persona_a:
-                    edges.append({
+                    e_infra_a = f"e_{persona_a}_{infra_id}"
+                    edges_dict[e_infra_a] = {
                         "data": {
-                            "id": f"e_{persona_a}_{infra_id}",
+                            "id": e_infra_a,
                             "source": persona_a,
                             "target": infra_id,
                             "label": "RUNS_ON",
                             "association": "VERIFIED_INFRASTRUCTURE" if rare_match else "INFERRED_INFRASTRUCTURE",
                             "evidence_strength": "HIGH" if rare_match else "MEDIUM",
-                            "evidence_id": eid
+                            "evidence_id": f"{eid}-A"
                         }
-                    })
+                    }
                 # Attach to Persona B only if telemetry present
                 if "persona_b_infra" in raw or raw.get("persona") == persona_b:
-                    edges.append({
+                    e_infra_b = f"e_{persona_b}_{infra_id}"
+                    edges_dict[e_infra_b] = {
                         "data": {
-                            "id": f"e_{persona_b}_{infra_id}",
+                            "id": e_infra_b,
                             "source": persona_b,
                             "target": infra_id,
                             "label": "RUNS_ON",
                             "association": "VERIFIED_INFRASTRUCTURE" if rare_match else "INFERRED_INFRASTRUCTURE",
                             "evidence_strength": "HIGH" if rare_match else "MEDIUM",
-                            "evidence_id": eid
+                            "evidence_id": f"{eid}-B"
                         }
-                    })
+                    }
 
         if hard_gate_triggered:
-            edges.append({
+            e_corr = f"e_{persona_a}_{persona_b}_conflict"
+            edges_dict[e_corr] = {
                 "data": {
-                    "id": f"e_{persona_a}_{persona_b}_conflict",
+                    "id": e_corr,
                     "source": persona_a,
                     "target": persona_b,
                     "label": "CONFLICTS_WITH",
@@ -547,11 +614,12 @@ class GraphEngine:
                     "assessment_id": actual_aid,
                     "evidence_ids": actual_eids
                 }
-            })
+            }
         else:
-            edges.append({
+            e_corr = f"e_{persona_a}_{persona_b}_inferred"
+            edges_dict[e_corr] = {
                 "data": {
-                    "id": f"e_{persona_a}_{persona_b}_inferred",
+                    "id": e_corr,
                     "source": persona_a,
                     "target": persona_b,
                     "label": "LIKELY_SAME_AS",
@@ -560,12 +628,15 @@ class GraphEngine:
                     "assessment_id": actual_aid,
                     "evidence_ids": actual_eids
                 }
-            })
+            }
+
+        # Calculate genuine degree centrality across nodes
+        _compute_and_attach_graph_metrics(nodes_dict, edges_dict, attribution_state, hard_gate_triggered)
 
         return {
             "graph_source": "LOCAL_FALLBACK",
-            "nodes": nodes,
-            "edges": edges
+            "nodes": list(nodes_dict.values()),
+            "edges": list(edges_dict.values())
         }
 
     @classmethod
@@ -581,7 +652,7 @@ class GraphEngine:
         evidence_ids: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """
-        Syncs artifacts to Neo4j and queries the live graph via Cypher.
+        Syncs artifacts to Neo4j and queries the live graph via Cypher with real degree centrality metrics.
         Falls back to local property graph generation if Neo4j is offline.
         """
         actual_aid = assessment_id or f"ASSESS-{investigation_id}"
@@ -593,7 +664,10 @@ class GraphEngine:
         )
         
         # Query Neo4j directly via Cypher
-        neo4j_graph = cls.query_neo4j_subgraph(investigation_id, persona_a, persona_b)
+        neo4j_graph = cls.query_neo4j_subgraph(
+            investigation_id, persona_a, persona_b,
+            attribution_state=attribution_state, hard_gate_triggered=hard_gate_triggered
+        )
         if neo4j_graph:
             return neo4j_graph
 

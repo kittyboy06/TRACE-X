@@ -1,0 +1,10 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+tracex.db
+.env
+venv/
+.git
+.gitignore

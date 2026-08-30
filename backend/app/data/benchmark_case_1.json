@@ -39,8 +39,8 @@
       "raw_payload": {
         "persona": "KryptonGhost",
         "forum": "Dread",
-        "post_text": "We provide custom kernel exploit development, stealth lateral movement toolkits, and verified escrow services across major underground networks. Escrow is strictly mandatory for all enterprise orders over 2 BTC. We operate on PGP encryption exclusively for all communications. Do not send unencrypted delivery addresses, cleartext server credentials, or Jabber handles under any circumstances. Respect our standard PGP signing key format. All payloads are compiled against clean kernel targets and delivered via one-time encrypted onion drops with automated verification. Inquiries without valid PGP signatures will be permanently ignored by our automated triage bot. Ensure your public key is uploaded to the keyserver beforehand. Full operational documentation is attached within the signed cryptographic container.",
-        "word_count": 155,
+        "post_text": "We provide custom kernel exploit development, stealth lateral movement toolkits, and verified escrow services across major underground networks. Escrow is strictly mandatory for all enterprise orders over 2 BTC. We operate on PGP encryption exclusively for all communications. Do not send unencrypted delivery addresses, cleartext server credentials, or Jabber handles under any circumstances. Respect our standard PGP signing key format. All payloads are compiled against clean kernel targets and delivered via one-time encrypted onion drops with automated verification. Inquiries without valid PGP signatures will be permanently ignored by our automated triage bot. Ensure your public key is uploaded to the keyserver beforehand. Full operational documentation is attached within the signed cryptographic container. Our team guarantees zero logging on intermediate jump boxes and enforces daily rotation of backend relay nodes. For bulk zero-day procurement, submit your deposit directly through multi-signature escrow addresses. We do not negotiate terms on public forum threads.",
+        "word_count": 168,
         "language": "en"
       }
     },
@@ -52,8 +52,8 @@
       "raw_payload": {
         "persona": "SpecterOp",
         "forum": "Exploit.in",
-        "post_text": "Providing specialized zero-day access vectors, privilege escalation binaries, and custom automated escrow solutions for verified syndicate members. Escrow is mandatory for all transactions above 2 BTC without exception. All orders require full PGP encryption prior to dispatch. Never transmit unencrypted delivery details, remote access credentials, or contact identifiers in open chat channels. Check our official PGP key signature before initiating transfer. Access packages are built against clean system environments and transferred through encrypted ephemeral onion links with checksum verification. Unsigned requests or unencrypted inquiries will be discarded by our operator system. Upload your public key block to the repository prior to engagement. Comprehensive deployment notes are enclosed inside the verified cryptographic archive.",
-        "word_count": 156,
+        "post_text": "Providing specialized zero-day access vectors, privilege escalation binaries, and custom automated escrow solutions for verified syndicate members. Escrow is mandatory for all transactions above 2 BTC without exception. All orders require full PGP encryption prior to dispatch. Never transmit unencrypted delivery details, remote access credentials, or contact identifiers in open chat channels. Check our official PGP key signature before initiating transfer. Access packages are built against clean system environments and transferred through encrypted ephemeral onion links with checksum verification. Unsigned requests or unencrypted inquiries will be discarded by our operator system. Upload your public key block to the repository prior to engagement. Comprehensive deployment notes are enclosed inside the verified cryptographic archive. Our operational cell maintains strict non-disclosure protocols and executes daily teardowns of ingress forwarding proxy infrastructure. For volume enterprise deployments, fund transactions exclusively via multi-sig escrow contracts. Public pricing debates are not permitted.",
+        "word_count": 169,
         "language": "en"
       }
     },

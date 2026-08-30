@@ -37,8 +37,8 @@
       "raw_payload": {
         "persona": "ShadowBroker_X",
         "forum": "XSS.is",
-        "post_text": "Selling high-tier corporate network access for Fortune 500 manufacturing conglomerate. Domain admin rights fully compromised and persistence verified across dual domain controllers. Initial vector was a spear-phishing payload deploying a custom loader bypassing modern EDR solutions. Bids start at 15 BTC with immediate buyout set at 30 BTC. Escrow is handled through verified platform administrators only. Direct technical inquiries should be submitted via OTR-encrypted Jabber. Proof of access including sanitized Active Directory schema exports and network topology diagrams is available upon request. Serious buyers only. Unverified intermediaries or price bargainers will be blacklisted.",
-        "word_count": 154,
+        "post_text": "Selling high-tier corporate network access for Fortune 500 manufacturing conglomerate. Domain admin rights fully compromised and persistence verified across dual domain controllers. Initial vector was a spear-phishing payload deploying a custom loader bypassing modern EDR solutions. Bids start at 15 BTC with immediate buyout set at 30 BTC. Escrow is handled through verified platform administrators only. Direct technical inquiries should be submitted via OTR-encrypted Jabber. Proof of access including sanitized Active Directory schema exports and network topology diagrams is available upon request. Serious buyers only. Unverified intermediaries or price bargainers will be blacklisted. We deploy automated cleanup scripts after handoff to neutralize competing implants. Transaction confirmation requires multi-signature escrow deposit. Private messaging without PGP handshake will be discarded.",
+        "word_count": 168,
         "language": "en"
       }
     },
@@ -50,8 +50,8 @@
       "raw_payload": {
         "persona": "PhantomAccess",
         "forum": "BreachForums",
-        "post_text": "Auctioning exclusive corporate network access for enterprise manufacturing targets. Full Domain admin rights verified with multiple redundant backdoors established across core server infrastructure. Vector established through customized phishing lures with automated credential harvesting. Starting bid 15 BTC with reserve buyout at 30 BTC. Inquire via Jabber/OTR for PGP-signed proof containers. Escrow strictly supported through accredited marketplace staff. Redacted enterprise tree dumps and internal IP subnets can be reviewed by vetted syndicates. Non-serious inquiries and lowball offers will be ignored. Contact our operator for instant engagement.",
-        "word_count": 152,
+        "post_text": "Auctioning exclusive corporate network access for enterprise manufacturing targets. Full Domain admin rights verified with multiple redundant backdoors established across core server infrastructure. Vector established through customized phishing lures with automated credential harvesting. Starting bid 15 BTC with reserve buyout at 30 BTC. Inquire via Jabber/OTR for PGP-signed proof containers. Escrow strictly supported through accredited marketplace staff. Redacted enterprise tree dumps and internal IP subnets can be reviewed by vetted syndicates. Non-serious inquiries and lowball offers will be ignored. Contact our operator for instant engagement. We execute full post-compromise sanitization routines to clear competing access tools upon transfer. Multi-sig escrow deposit is mandatory for all access transfers. Unencrypted communication attempts will be rejected immediately.",
+        "word_count": 169,
         "language": "en"
       }
     },

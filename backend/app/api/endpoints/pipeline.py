@@ -31,14 +31,22 @@ def execute_analysis_pipeline(investigation_id: str, db: Session) -> Dict[str, A
     if not inv:
         raise ValueError(f"Investigation {investigation_id} not found")
         
-    records = db.query(EvidenceRecordModel).filter(EvidenceRecordModel.investigation_id == investigation_id).all()
+    import json
+    def parse_payload(val):
+        if isinstance(val, str):
+            try:
+                return json.loads(val)
+            except Exception:
+                return {}
+        return val or {}
+
     artifacts = [
         {
             "evidence_id": r.evidence_id,
             "artifact_type": r.artifact_type,
             "source_uri": r.source_uri,
-            "collected_at": r.collected_at.isoformat(),
-            "raw_payload": r.raw_payload
+            "collected_at": r.collected_at.isoformat() if hasattr(r.collected_at, "isoformat") else str(r.collected_at),
+            "raw_payload": parse_payload(r.raw_payload)
         }
         for r in records
     ]

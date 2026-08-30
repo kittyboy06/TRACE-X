@@ -40,6 +40,7 @@ def execute_analysis_pipeline(investigation_id: str, db: Session) -> Dict[str, A
                 return {}
         return val or {}
 
+    records = db.query(EvidenceRecordModel).filter(EvidenceRecordModel.investigation_id == investigation_id).all()
     artifacts = [
         {
             "evidence_id": r.evidence_id,

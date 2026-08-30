@@ -209,7 +209,8 @@ class GraphEngine:
                     "target": persona_b,
                     "label": "CONFLICTS_WITH",
                     "evidence_strength": "CONTRADICTORY",
-                    "reason": "TEMPORAL_CONCURRENCY"
+                    "reason": "TEMPORAL_CONCURRENCY",
+                    "evidence_id": "EV-106-TEMPORAL-CLASH"
                 }
             })
         else:
@@ -220,7 +221,9 @@ class GraphEngine:
                     "target": persona_b,
                     "label": "LIKELY_SAME_AS",
                     "evidence_strength": "HIGH",
-                    "state": attribution_state
+                    "state": attribution_state,
+                    "assessment_id": f"ASSESS-{persona_a}-{persona_b}",
+                    "evidence_ids": [a.get("evidence_id") for a in artifacts if a.get("evidence_id")]
                 }
             })
 

@@ -95,9 +95,21 @@ export const App: React.FC = () => {
   };
 
   // Handle uploaded custom package
-  const handleUploadSuccess = async (newInvId: string) => {
+  const handleUploadSuccess = async (newInvId: string, uploadedArtifacts: any[], pA?: string, pB?: string) => {
     setActiveCase('custom');
     setInvestigationId(newInvId);
+    if (pA) setPersonaA(pA);
+    if (pB) setPersonaB(pB);
+    if (uploadedArtifacts && uploadedArtifacts.length > 0) {
+      setArtifacts(uploadedArtifacts);
+    } else {
+      try {
+        const artRes = await api.getArtifacts(newInvId);
+        setArtifacts(artRes.artifacts || []);
+      } catch (e) {
+        console.error('Failed to fetch artifacts', e);
+      }
+    }
     startPipelineStream(newInvId);
   };
 
@@ -196,7 +208,15 @@ export const App: React.FC = () => {
               assessment={assessment}
               onSelectNode={(nodeId) => {
                 setSelectedNodeId(nodeId);
-                const art = artifacts.find(a => a.raw_payload?.key_id === nodeId || a.evidence_id === nodeId);
+                const cleanId = nodeId.replace(/^PGP_/, '').replace(/^POST_/, '').replace(/^FORUM_/, '').replace(/^INFRA_/, '');
+                const art = artifacts.find(a => 
+                  a.evidence_id === nodeId || 
+                  a.raw_payload?.key_id === cleanId || 
+                  a.raw_payload?.key_id === nodeId ||
+                  a.evidence_id === cleanId ||
+                  `POST_${a.evidence_id}` === nodeId ||
+                  `INFRA_${a.evidence_id}` === nodeId
+                );
                 if (art) setSelectedEvidenceId(art.evidence_id);
               }}
             />

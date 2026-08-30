@@ -15,18 +15,18 @@ def lead_auditor_headers():
     return {"Authorization": f"Bearer {token}"}
 
 
-def test_append_only_audit_event(lead_auditor_headers):
+def test_append_only_audit_event_and_spoof_prevention(lead_auditor_headers):
     # 1. Load benchmark 1
     bench_resp = client.post("/api/v1/ingestion/benchmark/1")
     assert bench_resp.status_code == 200
     inv_id = bench_resp.json()["investigation_id"]
 
-    # 2. Record first analyst decision
+    # 2. Record first analyst decision with spoofed analyst_id in body
     req1 = {
         "investigation_id": inv_id,
         "assessment_id": "ASSESS-001",
         "action": "CONFIRMED",
-        "analyst_id": "AUDITOR-001",
+        "analyst_id": "SPOOFED_IMPERSONATOR_999",  # Should be overridden by JWT identity
         "rationale": "Corroborated across PGP and wallet CIOH cluster."
     }
     resp1 = client.post("/api/v1/audit/decision", json=req1, headers=lead_auditor_headers)
@@ -34,6 +34,8 @@ def test_append_only_audit_event(lead_auditor_headers):
     data1 = resp1.json()
     assert data1["event_hash"] is not None
     assert data1["action"] == "CONFIRMED"
+    # Identity is securely bound to JWT token (AUDITOR-001)
+    assert data1["analyst_id"] == "AUDITOR-001"
     assert "CONFIRMED" in data1["resulting_state"]
 
     # 3. Record second decision
@@ -50,8 +52,44 @@ def test_append_only_audit_event(lead_auditor_headers):
     assert data2["event_hash"] != data1["event_hash"]
     assert data2["resulting_state"] == "UNDER_FURTHER_INVESTIGATION"
 
-    # 4. Test export dossier
-    dossier_resp = client.get(f"/api/v1/audit/export/{inv_id}")
+    # 4. Test protected export dossier
+    # Unauthenticated export -> 401
+    resp_unauth = client.get(f"/api/v1/audit/export/{inv_id}")
+    assert resp_unauth.status_code == 401
+
+    # Authenticated export -> 200
+    dossier_resp = client.get(f"/api/v1/audit/export/{inv_id}", headers=lead_auditor_headers)
     assert dossier_resp.status_code == 200
     dossier = dossier_resp.json()
     assert len(dossier["audit_trail"]) >= 2
+
+
+def test_commit_weights_audit_provenance(lead_auditor_headers):
+    # 1. Load benchmark 1
+    bench_resp = client.post("/api/v1/ingestion/benchmark/1")
+    assert bench_resp.status_code == 200
+    inv_id = bench_resp.json()["investigation_id"]
+
+    # 2. Run analysis pipeline to establish initial assessment
+    from app.models.database import SessionLocal
+    from app.api.endpoints.pipeline import execute_analysis_pipeline
+    db = SessionLocal()
+    execute_analysis_pipeline(inv_id, db)
+    db.close()
+
+    # 3. Commit tuned weights
+    tune_req = {
+        "investigation_id": inv_id,
+        "weight_cryptographic": 0.35,
+        "weight_financial": 0.20,
+        "weight_stylometric": 0.20,
+        "weight_infrastructure": 0.15,
+        "weight_behavioral": 0.10
+    }
+    commit_resp = client.post("/api/v1/attribution/commit-weights", json=tune_req, headers=lead_auditor_headers)
+    assert commit_resp.status_code == 200
+    commit_data = commit_resp.json()
+    assert commit_data["status"] == "COMMITTED"
+    assert "audit_event" in commit_data
+    assert commit_data["audit_event"]["action"] == "WEIGHTS_COMMITTED"
+    assert commit_data["audit_event"]["event_hash"] is not None

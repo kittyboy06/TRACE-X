@@ -35,9 +35,9 @@
 
 ## 🎯 Executive Overview
 
-**TRACE-X** is an explainable, multi-modal Cyber Threat Intelligence (CTI) platform engineered to correlate dark-web operational personas, cryptocurrency flows, infrastructure fingerprints, linguistic stylometry, and behavioral dormancy patterns. It transforms disparate darknet artifacts into deterministic, mathematically rigorous attribution assessments while preventing artificial intelligence hallucinations and false-positive attributions.
+**TRACE-X** is an explainable, multi-modal Cyber Threat Intelligence (CTI) platform engineered to correlate dark-web operational personas, cryptocurrency flows, infrastructure fingerprints, linguistic stylometry, and behavioral dormancy patterns. It transforms disparate darknet artifacts into explainable, evidence-backed attribution assessments for analyst decision support while preventing artificial intelligence hallucinations and false-positive attributions.
 
-Traditional attribution tools often rely on naive similarity heuristics or black-box neural aggregations that conflate financial obfuscation with innocence or treat coincidence as definitive proof. **TRACE-X introduces a Two-Level Contradiction Fusion Model** with channel-specific dampening and global hard gates, ensuring that threat intelligence analysts and law enforcement agencies receive auditable, court-ready evidence packages.
+Traditional attribution tools often rely on naive similarity heuristics or black-box neural aggregations that conflate financial obfuscation with innocence or treat coincidence as definitive proof. **TRACE-X introduces a Two-Level Contradiction Fusion Model** with channel-specific dampening and global hard gates, ensuring that threat intelligence analysts receive auditable, structured evidence dossiers.
 
 ---
 

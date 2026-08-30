@@ -2,10 +2,12 @@ import React, { useState, useRef } from 'react';
 import { Upload, FileText, CheckCircle2, AlertTriangle, X, ArrowRight, Database } from 'lucide-react';
 import { api } from '../services/api';
 
+const ALLOWED_TYPES = ['FORUM_POST', 'PGP_KEY', 'BTC_TRANSACTION', 'INFRASTRUCTURE_HEADER', 'TEMPORAL_BURST'];
+
 interface UploadModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onUploadSuccess: (investigationId: string) => void;
+  onUploadSuccess: (investigationId: string, artifacts: any[], personaA?: string, personaB?: string) => void;
 }
 
 export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUploadSuccess }) => {
@@ -15,35 +17,65 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
   const [parsedPreview, setParsedPreview] = useState<any | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState<boolean>(false);
+  const [isDragging, setIsDragging] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
 
+  const processFile = (file: File) => {
+    setSelectedFile(file);
+    setValidationError(null);
+
+    if (file.name.endsWith('.json')) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const data = JSON.parse(event.target?.result as string);
+          validateAndPreview(data);
+        } catch (err: any) {
+          setValidationError('Failed to parse JSON file: ' + err.message);
+          setParsedPreview(null);
+        }
+      };
+      reader.readAsText(file);
+    } else if (file.name.endsWith('.zip')) {
+      setParsedPreview({
+        filename: file.name,
+        size_kb: Math.round(file.size / 1024),
+        isZip: true,
+        investigation_id: `INV-${Date.now().toString().slice(-6)}`
+      });
+    } else {
+      setValidationError('Unsupported file format. Please provide a .json or .zip package.');
+      setSelectedFile(null);
+      setParsedPreview(null);
+    }
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      setSelectedFile(file);
-      setValidationError(null);
+      processFile(e.target.files[0]);
+    }
+  };
 
-      if (file.name.endsWith('.json')) {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          try {
-            const data = JSON.parse(event.target?.result as string);
-            validateAndPreview(data);
-          } catch (err: any) {
-            setValidationError('Failed to parse JSON file: ' + err.message);
-            setParsedPreview(null);
-          }
-        };
-        reader.readAsText(file);
-      } else if (file.name.endsWith('.zip')) {
-        setParsedPreview({
-          filename: file.name,
-          size_kb: Math.round(file.size / 1024),
-          isZip: true
-        });
-      }
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      processFile(e.dataTransfer.files[0]);
     }
   };
 
@@ -65,14 +97,33 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
 
   const validateAndPreview = (data: any) => {
     if (!data.target_persona_a || !data.target_persona_b) {
-      setValidationError('Package must specify "target_persona_a" and "target_persona_b"');
+      setValidationError('Package must specify "target_persona_a" and "target_persona_b".');
       setParsedPreview(null);
       return;
     }
     if (!Array.isArray(data.artifacts) || data.artifacts.length === 0) {
-      setValidationError('Package must contain non-empty "artifacts" array');
+      setValidationError('Package must contain non-empty "artifacts" array.');
       setParsedPreview(null);
       return;
+    }
+
+    for (let i = 0; i < data.artifacts.length; i++) {
+      const art = data.artifacts[i];
+      if (!art || typeof art !== 'object') {
+        setValidationError(`Artifact at index ${i} is not a valid object.`);
+        setParsedPreview(null);
+        return;
+      }
+      if (!art.artifact_type || !ALLOWED_TYPES.includes(art.artifact_type)) {
+        setValidationError(`Artifact ${i} has invalid artifact_type '${art.artifact_type}'. Allowed: ${ALLOWED_TYPES.join(', ')}`);
+        setParsedPreview(null);
+        return;
+      }
+      if (!art.raw_payload || typeof art.raw_payload !== 'object') {
+        setValidationError(`Artifact ${i} (${art.artifact_type}) must have a valid 'raw_payload' object.`);
+        setParsedPreview(null);
+        return;
+      }
     }
 
     setParsedPreview({
@@ -80,7 +131,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
       persona_a: data.target_persona_a,
       persona_b: data.target_persona_b,
       artifact_count: data.artifacts.length,
-      types: Array.from(new Set(data.artifacts.map((a: any) => a.artifact_type || 'UNKNOWN')))
+      artifacts: data.artifacts,
+      types: Array.from(new Set(data.artifacts.map((a: any) => a.artifact_type)))
     });
     setValidationError(null);
   };
@@ -90,9 +142,16 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
     setValidationError(null);
     try {
       let invId = '';
+      let ingestedArtifacts: any[] = [];
+      let pA = '';
+      let pB = '';
+
       if (activeTab === 'file' && selectedFile) {
         const res = await api.uploadFile(selectedFile);
         invId = res.investigation_id;
+        ingestedArtifacts = res.records || [];
+        pA = res.persona_a;
+        pB = res.persona_b;
       } else if (activeTab === 'json' && parsedPreview) {
         const payload = JSON.parse(jsonText);
         if (!payload.investigation_id) {
@@ -100,11 +159,14 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
         }
         const res = await api.uploadPackage(payload);
         invId = res.investigation_id;
+        ingestedArtifacts = res.records || [];
+        pA = res.persona_a;
+        pB = res.persona_b;
       }
 
       if (invId) {
         onClose();
-        onUploadSuccess(invId);
+        onUploadSuccess(invId, ingestedArtifacts, pA, pB);
       }
     } catch (err: any) {
       setValidationError(err.response?.data?.detail || err.message || 'Upload failed');
@@ -121,12 +183,24 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
       {
         evidence_id: "EV-CUSTOM-001",
         artifact_type: "PGP_KEY",
-        source_uri: "darknet://forum.onion/users/darkghost",
+        source_uri: "darknet://keys.onion/123",
         collected_at: new Date().toISOString(),
         raw_payload: {
           key_id: "0x89AB_CDEF",
           key_fingerprint: "F7A9 3B12 C45E 89AB CDEF 1029 48FA 90B1",
           persona: "DarkGhost_Admin"
+        }
+      },
+      {
+        evidence_id: "EV-CUSTOM-002",
+        artifact_type: "FORUM_POST",
+        source_uri: "darknet://forum.onion/threads/100",
+        collected_at: new Date().toISOString(),
+        raw_payload: {
+          forum: "DreadForum",
+          persona: "Specter_Operator",
+          post_text: "Security audit and exploit disclosure for darknet escrow smart contracts.",
+          word_count: 10
         }
       }
     ]
@@ -185,7 +259,15 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
           {activeTab === 'file' ? (
             <div
               onClick={() => fileInputRef.current?.click()}
-              className="border-2 border-dashed border-slate-700 hover:border-blue-500/60 rounded-xl p-8 text-center cursor-pointer bg-slate-950/40 hover:bg-blue-500/5 transition flex flex-col items-center justify-center gap-3"
+              onDragOver={handleDragOver}
+              onDragEnter={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition flex flex-col items-center justify-center gap-3 ${
+                isDragging
+                  ? 'border-blue-400 bg-blue-500/10 scale-[1.01]'
+                  : 'border-slate-700 hover:border-blue-500/60 bg-slate-950/40 hover:bg-blue-500/5'
+              }`}
             >
               <input
                 ref={fileInputRef}
@@ -201,7 +283,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
                 <p className="text-sm font-medium text-slate-200">
                   {selectedFile ? selectedFile.name : 'Click to select or drag & drop evidence package'}
                 </p>
-                <p className="text-xs text-slate-500 mt-1">Supports structured JSON and ZIP artifact archives</p>
+                <p className="text-xs text-slate-500 mt-1">Supports structured JSON and ZIP artifact archives (max 10MB)</p>
               </div>
             </div>
           ) : (

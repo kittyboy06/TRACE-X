@@ -34,7 +34,8 @@ def record_analyst_decision(
     elif req.action.value == "INVESTIGATE":
         resulting_state = "UNDER_FURTHER_INVESTIGATION"
 
-    effective_analyst = req.analyst_id or current_user.get("analyst_id", "ANALYST-001")
+    # Authoritative analyst identity bound to verified JWT token claims
+    effective_analyst = current_user.get("analyst_id", "ANALYST-001")
     now = datetime.utcnow()
     audit_id = f"AUDIT-{now.strftime('%Y%m%d%H%M%S%f')}-{effective_analyst[-4:]}"
     
@@ -83,12 +84,19 @@ def record_analyst_decision(
 
 
 @router.get("/export/{investigation_id}")
-def export_investigation_dossier(investigation_id: str, db: Session = Depends(get_db)):
+def export_investigation_dossier(
+    investigation_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_role("LEAD_AUDITOR", "CTI_ANALYST"))
+):
     """
     Exports a comprehensive, tamper-evident audit dossier of the entire investigation.
+    Requires authenticated CTI_ANALYST or LEAD_AUDITOR role.
     """
     inv = db.query(InvestigationModel).filter(InvestigationModel.id == investigation_id).first()
-    assess = db.query(AttributionAssessmentModel).filter(AttributionAssessmentModel.investigation_id == investigation_id).first()
+    assess = db.query(AttributionAssessmentModel).filter(
+        AttributionAssessmentModel.investigation_id == investigation_id
+    ).order_by(AttributionAssessmentModel.created_at.desc()).first()
     audits = db.query(AuditEventModel).filter(AuditEventModel.investigation_id == investigation_id).all()
 
     if not inv:

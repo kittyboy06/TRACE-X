@@ -33,6 +33,11 @@ export const api = {
     return res.data;
   },
 
+  async getArtifacts(investigationId: string) {
+    const res = await axios.get(`${API_BASE}/ingestion/${investigationId}/artifacts`);
+    return res.data;
+  },
+
   async uploadPackage(payload: any) {
     const res = await axios.post(`${API_BASE}/ingestion/upload`, payload);
     return res.data;

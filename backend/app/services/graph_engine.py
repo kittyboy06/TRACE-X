@@ -21,13 +21,12 @@ class GraphEngine:
                 settings.NEO4J_URI,
                 auth=(settings.NEO4J_USER, settings.NEO4J_PASSWORD)
             )
-            # Verify connectivity
             driver.verify_connectivity()
             cls._neo4j_driver = driver
-            logger.info("Successfully connected to Neo4j Property Graph.")
+            logger.info("Successfully established connection to Neo4j Property Graph.")
             return cls._neo4j_driver
         except Exception as e:
-            logger.warning(f"Neo4j not reachable ({str(e)}). Using local property graph generator.")
+            logger.info(f"Neo4j instance offline ({str(e)}). Utilizing deterministic local graph engine.")
             cls._neo4j_driver = None
             return None
 
@@ -47,7 +46,6 @@ class GraphEngine:
             keys = [a.get("raw_payload", {}).get("key_id") for a in pgp_artifacts]
             fingerprints = [a.get("raw_payload", {}).get("key_fingerprint") for a in pgp_artifacts]
             
-            # Check for exact PGP key ID or fingerprint reuse
             if len(set(keys)) == 1 and keys[0] is not None:
                 raw_crypto = 0.95
                 details_crypto = {
@@ -121,9 +119,17 @@ class GraphEngine:
         return crypto_signal, infra_signal
 
     @classmethod
-    def sync_to_neo4j(cls, investigation_id: str, persona_a: str, persona_b: str, artifacts: List[Dict[str, Any]]):
+    def sync_to_neo4j(
+        cls,
+        investigation_id: str,
+        persona_a: str,
+        persona_b: str,
+        artifacts: List[Dict[str, Any]],
+        attribution_state: str,
+        hard_gate_triggered: bool
+    ) -> bool:
         """
-        Persists nodes and relationships into Neo4j via Cypher when available.
+        Persists comprehensive CTI property graph (Personas, PGP, Forums, Posts, Wallets, VASPs, Infra) into Neo4j via Cypher.
         """
         driver = cls._get_neo4j_driver()
         if not driver:
@@ -131,12 +137,13 @@ class GraphEngine:
 
         try:
             with driver.session() as session:
-                # Merge Personas
+                # Merge target personas
                 session.run(
                     "MERGE (p1:Persona {id: $p1, label: $p1, investigation_id: $inv}) "
                     "MERGE (p2:Persona {id: $p2, label: $p2, investigation_id: $inv})",
                     p1=persona_a, p2=persona_b, inv=investigation_id
                 )
+
                 for art in artifacts:
                     art_type = art.get("artifact_type")
                     raw = art.get("raw_payload", {})
@@ -146,29 +153,170 @@ class GraphEngine:
                         key_id = raw.get("key_id", "UNKNOWN")
                         persona = raw.get("persona", persona_a)
                         session.run(
-                            "MERGE (k:PGP_Key {id: $key_id, fingerprint: $fp}) "
+                            "MERGE (k:PGP_Key {id: $key_id, label: $key_lbl, fingerprint: $fp, type: 'PGP_Key'}) "
                             "MERGE (p:Persona {id: $persona}) "
-                            "MERGE (p)-[:USED {evidence_id: $eid}]->(k)",
-                            key_id=key_id, fp=raw.get("key_fingerprint", ""), persona=persona, eid=eid
+                            "MERGE (p)-[:USED {evidence_id: $eid, strength: 'VERY_HIGH'}]->(k)",
+                            key_id=f"PGP_{key_id}", key_lbl=f"PGP: {key_id}", fp=raw.get("key_fingerprint", ""), persona=persona, eid=eid
                         )
                     elif art_type == "FORUM_POST":
                         forum = raw.get("forum", "Darknet_Forum")
                         persona = raw.get("persona", persona_a)
                         session.run(
-                            "MERGE (f:Forum {id: $forum, name: $forum}) "
-                            "MERGE (post:Forum_Post {id: $eid, word_count: $wc}) "
+                            "MERGE (f:Forum {id: $forum, label: $forum, type: 'Forum'}) "
+                            "MERGE (post:Forum_Post {id: $post_id, label: $post_lbl, type: 'Forum_Post', word_count: $wc}) "
                             "MERGE (p:Persona {id: $persona}) "
                             "MERGE (p)-[:AUTHORED {evidence_id: $eid}]->(post) "
                             "MERGE (post)-[:POSTED_ON]->(f)",
-                            forum=forum, eid=eid, wc=raw.get("word_count", 0), persona=persona
+                            forum=f"FORUM_{forum}", post_id=f"POST_{eid}", post_lbl=f"Post ({forum})", wc=raw.get("word_count", 0), persona=persona, eid=eid
                         )
+                    elif art_type == "BTC_TRANSACTION":
+                        cluster_id = raw.get("cluster_id", "BTC_CLUSTER")
+                        session.run(
+                            "MERGE (w:Wallet {id: $wid, label: $wlbl, type: 'Wallet', method: $method})",
+                            wid=cluster_id, wlbl=f"Wallet: {cluster_id}", method=raw.get("clustering_method", "CIOH")
+                        )
+                        # Link Persona A
+                        session.run(
+                            "MERGE (p:Persona {id: $pa}) MERGE (w:Wallet {id: $wid}) "
+                            "MERGE (p)-[:FUNDED_FROM {evidence_id: $eid}]->(w)",
+                            pa=persona_a, wid=cluster_id, eid=eid
+                        )
+                        # Only link Persona B if recipient
+                        outputs = raw.get("outputs", [])
+                        if any(persona_b.lower() in str(out).lower() for out in outputs) or raw.get("recipient_persona") == persona_b:
+                            session.run(
+                                "MERGE (p:Persona {id: $pb}) MERGE (w:Wallet {id: $wid}) "
+                                "MERGE (w)-[:TRANSFERRED_TO {evidence_id: $eid}]->(p)",
+                                pb=persona_b, wid=cluster_id, eid=eid
+                            )
+                        # VASP Hops
+                        for hop in raw.get("hops_to_vasp", []):
+                            vasp = hop.get("vasp_entity")
+                            if vasp:
+                                vasp_id = f"VASP_{vasp.replace(' ', '_')}"
+                                session.run(
+                                    "MERGE (v:VASP {id: $vid, label: $vlbl, type: 'VASP'}) "
+                                    "MERGE (w:Wallet {id: $wid}) "
+                                    "MERGE (w)-[:TOUCHES_VASP {amount_btc: $amt}]->(v)",
+                                    vid=vasp_id, vlbl=vasp, wid=cluster_id, amt=hop.get("amount_btc", 0.0)
+                                )
+                    elif art_type == "INFRASTRUCTURE_HEADER":
+                        infra_id = f"INFRA_{eid}"
+                        session.run(
+                            "MERGE (i:Infrastructure {id: $iid, label: $ilbl, type: 'Infrastructure'}) "
+                            "MERGE (p1:Persona {id: $pa}) MERGE (p2:Persona {id: $pb}) "
+                            "MERGE (p1)-[:RUNS_ON {evidence_id: $eid}]->(i) "
+                            "MERGE (p2)-[:RUNS_ON {evidence_id: $eid}]->(i)",
+                            iid=infra_id, ilbl=f"Infra: {raw.get('persona_a_infra', {}).get('ssh_banner', 'SSH-Daemon')[:16]}",
+                            pa=persona_a, pb=persona_b, eid=eid
+                        )
+
+                # Merge correlation / conflict relationship between target personas
+                if hard_gate_triggered:
+                    session.run(
+                        "MERGE (p1:Persona {id: $p1}) MERGE (p2:Persona {id: $p2}) "
+                        "MERGE (p1)-[:CONFLICTS_WITH {reason: 'TEMPORAL_CONCURRENCY', evidence_strength: 'CONTRADICTORY'}]->(p2)",
+                        p1=persona_a, p2=persona_b
+                    )
+                else:
+                    session.run(
+                        "MERGE (p1:Persona {id: $p1}) MERGE (p2:Persona {id: $p2}) "
+                        "MERGE (p1)-[:LIKELY_SAME_AS {state: $state, assessment_id: $aid, evidence_strength: 'HIGH'}]->(p2)",
+                        p1=persona_a, p2=persona_b, state=attribution_state, aid=f"ASSESS-{persona_a}-{persona_b}"
+                    )
             return True
         except Exception as e:
-            logger.warning(f"Neo4j sync failed ({str(e)})")
+            logger.warning(f"Neo4j sync execution failed ({str(e)})")
             return False
 
     @classmethod
-    def generate_cytoscape_graph(
+    def query_neo4j_subgraph(
+        cls,
+        investigation_id: str,
+        persona_a: str,
+        persona_b: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Executes Cypher MATCH queries against Neo4j to build the Cytoscape visualization payload from real database records.
+        """
+        driver = cls._get_neo4j_driver()
+        if not driver:
+            return None
+
+        try:
+            with driver.session() as session:
+                cypher = """
+                MATCH (p:Persona)
+                WHERE p.id IN [$pa, $pb] OR p.investigation_id = $inv
+                OPTIONAL MATCH (p)-[r]-(n)
+                RETURN p, r, n
+                """
+                results = session.run(cypher, pa=persona_a, pb=persona_b, inv=investigation_id)
+                
+                nodes_dict = {}
+                edges_dict = {}
+
+                for record in results:
+                    p = record.get("p")
+                    r = record.get("r")
+                    n = record.get("n")
+
+                    if p:
+                        pid = p.get("id", str(p.element_id if hasattr(p, 'element_id') else p.id))
+                        if pid not in nodes_dict:
+                            nodes_dict[pid] = {
+                                "data": {
+                                    "id": pid,
+                                    "label": p.get("label", pid),
+                                    "type": "Persona",
+                                    "risk": "HIGH",
+                                    "centrality": 0.85
+                                }
+                            }
+
+                    if n:
+                        nid = n.get("id", str(n.element_id if hasattr(n, 'element_id') else n.id))
+                        ntype = list(n.labels)[0] if hasattr(n, 'labels') and n.labels else n.get("type", "Node")
+                        if nid not in nodes_dict:
+                            nodes_dict[nid] = {
+                                "data": {
+                                    "id": nid,
+                                    "label": n.get("label", nid),
+                                    "type": ntype,
+                                    "fingerprint": n.get("fingerprint")
+                                }
+                            }
+
+                    if r:
+                        r_id = f"e_{r.start_node['id'] if 'id' in r.start_node else r.id}_{r.end_node['id'] if 'id' in r.end_node else r.id}_{r.type}"
+                        if r_id not in edges_dict:
+                            source_id = r.start_node.get("id", str(r.start_node.id))
+                            target_id = r.end_node.get("id", str(r.end_node.id))
+                            edges_dict[r_id] = {
+                                "data": {
+                                    "id": r_id,
+                                    "source": source_id,
+                                    "target": target_id,
+                                    "label": r.type,
+                                    "evidence_id": r.get("evidence_id"),
+                                    "evidence_strength": r.get("evidence_strength", "HIGH"),
+                                    "state": r.get("state")
+                                }
+                            }
+
+                if nodes_dict:
+                    return {
+                        "graph_source": "NEO4J_PROPERTY_GRAPH",
+                        "nodes": list(nodes_dict.values()),
+                        "edges": list(edges_dict.values())
+                    }
+        except Exception as e:
+            logger.warning(f"Neo4j Cypher query failed ({str(e)}). Falling back to local graph builder.")
+
+        return None
+
+    @classmethod
+    def _build_local_cytoscape_graph(
         cls,
         investigation_id: str,
         persona_a: str,
@@ -178,16 +326,11 @@ class GraphEngine:
         hard_gate_triggered: bool
     ) -> Dict[str, Any]:
         """
-        Builds a comprehensive Cytoscape.js compatible graph payload with typed nodes and evidentiary edges.
-        Includes graph_source metadata indicating NEO4J_PROPERTY_GRAPH or LOCAL_FALLBACK.
+        Deterministic, local property graph constructor used when Neo4j is offline or unavailable.
         """
-        neo4j_synced = cls.sync_to_neo4j(investigation_id, persona_a, persona_b, artifacts)
-        graph_source = "NEO4J_PROPERTY_GRAPH" if neo4j_synced else "LOCAL_FALLBACK"
-
         nodes = []
         edges = []
 
-        # Persona Nodes with dynamic centrality/threat level
         threat_level = "CRITICAL" if attribution_state == "CONFIRMED_LINK" else ("EVALUATING" if hard_gate_triggered else "HIGH")
         nodes.append({
             "data": {
@@ -208,7 +351,6 @@ class GraphEngine:
             }
         })
 
-        # Process Artifacts
         for art in artifacts:
             art_type = art.get("artifact_type")
             raw = art.get("raw_payload", {})
@@ -223,10 +365,10 @@ class GraphEngine:
                             "id": key_node_id,
                             "label": f"PGP: {key_id}",
                             "type": "PGP_Key",
-                            "fingerprint": raw.get("key_fingerprint")
+                            "fingerprint": raw.get("key_fingerprint"),
+                            "evidence_id": eid
                         }
                     })
-                # Edge to specific persona
                 persona = raw.get("persona", persona_a)
                 edges.append({
                     "data": {
@@ -248,7 +390,13 @@ class GraphEngine:
                     })
                 post_node_id = f"POST_{eid}"
                 nodes.append({
-                    "data": {"id": post_node_id, "label": f"Post ({forum})", "type": "Forum_Post", "words": raw.get("word_count")}
+                    "data": {
+                        "id": post_node_id,
+                        "label": f"Post ({forum})",
+                        "type": "Forum_Post",
+                        "words": raw.get("word_count"),
+                        "evidence_id": eid
+                    }
                 })
                 persona = raw.get("persona", persona_a)
                 edges.append({
@@ -262,11 +410,9 @@ class GraphEngine:
                 cluster_id = raw.get("cluster_id", "BTC_CLUSTER")
                 if not any(n["data"]["id"] == cluster_id for n in nodes):
                     nodes.append({
-                        "data": {"id": cluster_id, "label": f"Wallet: {cluster_id}", "type": "Wallet", "method": raw.get("clustering_method")}
+                        "data": {"id": cluster_id, "label": f"Wallet: {cluster_id}", "type": "Wallet", "method": raw.get("clustering_method"), "evidence_id": eid}
                     })
                 
-                # Precise wallet relationships:
-                # Link Persona A if inputs belong to Persona A or explicit persona tag
                 inputs = raw.get("inputs", [])
                 outputs = raw.get("outputs", [])
                 
@@ -275,18 +421,15 @@ class GraphEngine:
                         "data": {"id": f"e_{persona_a}_{cluster_id}", "source": persona_a, "target": cluster_id, "label": "FUNDED_FROM", "evidence_id": eid}
                     })
                 else:
-                    # Default associated if part of persona A telemetry
                     edges.append({
                         "data": {"id": f"e_{persona_a}_{cluster_id}", "source": persona_a, "target": cluster_id, "label": "ASSOCIATED_WITH", "evidence_id": eid}
                     })
 
-                # Only link Persona B if Persona B is in outputs or explicitly associated
                 if any(persona_b.lower() in str(out).lower() for out in outputs) or raw.get("recipient_persona") == persona_b:
                     edges.append({
                         "data": {"id": f"e_{cluster_id}_{persona_b}", "source": cluster_id, "target": persona_b, "label": "TRANSFERRED_TO", "evidence_id": eid}
                     })
 
-                # VASP Hops
                 for hop in raw.get("hops_to_vasp", []):
                     vasp = hop.get("vasp_entity")
                     if vasp:
@@ -297,7 +440,19 @@ class GraphEngine:
                             "data": {"id": f"e_{cluster_id}_{vasp_id}", "source": cluster_id, "target": vasp_id, "label": "TOUCHES_VASP", "amount_btc": hop.get("amount_btc")}
                         })
 
-        # Inferred attribution / conflict edge between Persona A and Persona B
+            elif art_type == "INFRASTRUCTURE_HEADER":
+                infra_id = f"INFRA_{eid}"
+                if not any(n["data"]["id"] == infra_id for n in nodes):
+                    nodes.append({
+                        "data": {"id": infra_id, "label": f"Infra: {raw.get('persona_a_infra', {}).get('ssh_banner', 'SSH-Daemon')[:16]}", "type": "Infrastructure", "evidence_id": eid}
+                    })
+                edges.append({
+                    "data": {"id": f"e_{persona_a}_{infra_id}", "source": persona_a, "target": infra_id, "label": "RUNS_ON", "evidence_id": eid}
+                })
+                edges.append({
+                    "data": {"id": f"e_{persona_b}_{infra_id}", "source": persona_b, "target": infra_id, "label": "RUNS_ON", "evidence_id": eid}
+                })
+
         if hard_gate_triggered:
             edges.append({
                 "data": {
@@ -325,7 +480,33 @@ class GraphEngine:
             })
 
         return {
-            "graph_source": graph_source,
+            "graph_source": "LOCAL_FALLBACK",
             "nodes": nodes,
             "edges": edges
         }
+
+    @classmethod
+    def generate_cytoscape_graph(
+        cls,
+        investigation_id: str,
+        persona_a: str,
+        persona_b: str,
+        artifacts: List[Dict[str, Any]],
+        attribution_state: str,
+        hard_gate_triggered: bool
+    ) -> Dict[str, Any]:
+        """
+        Syncs artifacts to Neo4j and queries the live graph via Cypher.
+        Falls back to local property graph generation if Neo4j is offline.
+        """
+        cls.sync_to_neo4j(investigation_id, persona_a, persona_b, artifacts, attribution_state, hard_gate_triggered)
+        
+        # Query Neo4j directly via Cypher
+        neo4j_graph = cls.query_neo4j_subgraph(investigation_id, persona_a, persona_b)
+        if neo4j_graph:
+            return neo4j_graph
+
+        # Fallback
+        return cls._build_local_cytoscape_graph(
+            investigation_id, persona_a, persona_b, artifacts, attribution_state, hard_gate_triggered
+        )

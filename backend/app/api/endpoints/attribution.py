@@ -126,8 +126,10 @@ def commit_tuned_weights(
         AttributionAssessmentModel.investigation_id == req.investigation_id
     ).update({"is_current": False})
 
-    new_assessment_id = f"ASSESS-{req.investigation_id}-{datetime.utcnow().strftime('%H%M%S')}"
+    new_assessment_id = f"ASSESS-{req.investigation_id}-{datetime.utcnow().strftime('%H%M%S%f')}"
     preview["assessment_id"] = new_assessment_id
+    analyst_id = current_user.get("analyst_id", "ANALYST-001")
+    now = datetime.utcnow()
 
     db_assess = AttributionAssessmentModel(
         assessment_id=new_assessment_id,
@@ -139,13 +141,53 @@ def commit_tuned_weights(
         real_world_identity="NOT ESTABLISHED",
         is_current=True,
         payload=preview,
-        created_at=datetime.utcnow()
+        created_at=now
     )
     db.add(db_assess)
+
+    # Log immutable audit event for sensitivity calibration
+    import hashlib
+    audit_id = f"AUDIT-{now.strftime('%Y%m%d%H%M%S%f')}-{analyst_id[-4:]}"
+    rationale = (
+        f"Analyst calibrated dimension weights (Crypto: {req.weight_cryptographic}, "
+        f"Fin: {req.weight_financial}, Style: {req.weight_stylometric}, "
+        f"Infra: {req.weight_infrastructure}, Beh: {req.weight_behavioral})"
+    )
+    hash_payload = {
+        "audit_id": audit_id,
+        "investigation_id": req.investigation_id,
+        "assessment_id": new_assessment_id,
+        "action": "WEIGHTS_COMMITTED",
+        "analyst_id": analyst_id,
+        "timestamp": now.isoformat(),
+        "rationale": rationale,
+        "prior_state": record.attribution_state,
+        "resulting_state": preview["attribution_state"]
+    }
+    event_hash = hashlib.sha256(json.dumps(hash_payload, sort_keys=True).encode("utf-8")).hexdigest()
+
+    db_audit = AuditEventModel(
+        audit_id=audit_id,
+        investigation_id=req.investigation_id,
+        assessment_id=new_assessment_id,
+        action="WEIGHTS_COMMITTED",
+        analyst_id=analyst_id,
+        timestamp=now,
+        rationale=rationale,
+        prior_state=record.attribution_state,
+        resulting_state=preview["attribution_state"],
+        event_hash=event_hash
+    )
+    db.add(db_audit)
     db.commit()
 
     return {
         "status": "COMMITTED",
-        "message": f"Tuned weights committed by {current_user.get('analyst_id')}",
-        "assessment": preview
+        "message": f"Tuned weights committed by {analyst_id}",
+        "assessment": preview,
+        "audit_event": {
+            "audit_id": audit_id,
+            "action": "WEIGHTS_COMMITTED",
+            "event_hash": event_hash
+        }
     }

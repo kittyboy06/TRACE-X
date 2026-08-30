@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environments & Databases
+.env
+venv/
+.venv/
+*.db
+*.sqlite
+*.sqlite3
+tracex.db
+
+# Logs
+*.log

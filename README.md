@@ -4,7 +4,7 @@
 
 ---
 
-[![CI Tests](https://img.shields.io/badge/Tests-8%2F8%20Passed-emerald?style=flat-square&logo=pytest)](https://pytest.org)
+[![CI Tests](https://img.shields.io/badge/Tests-19%2F19%20Passed-emerald?style=flat-square&logo=pytest)](https://pytest.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110.0-009688?style=flat-square&logo=fastapi)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/React-18.3.1-61DAFB?style=flat-square&logo=react)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.2-3178C6?style=flat-square&logo=typescript)](https://www.typescriptlang.org)

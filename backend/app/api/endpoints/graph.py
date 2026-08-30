@@ -35,7 +35,9 @@ def get_cytoscape_graph(investigation_id: str, db: Session = Depends(get_db)):
     
     # Check if hard gate triggered
     hard_gate = False
+    actual_assessment_id = f"ASSESS-{investigation_id}"
     if assess_record and assess_record.payload:
+        actual_assessment_id = assess_record.assessment_id
         hard_gate = assess_record.payload.get("assessment_rationale", {}).get("hard_cap_applied", False)
 
     graph_data = GraphEngine.generate_cytoscape_graph(
@@ -44,7 +46,9 @@ def get_cytoscape_graph(investigation_id: str, db: Session = Depends(get_db)):
         persona_b=inv.target_persona_b,
         artifacts=artifacts,
         attribution_state=state,
-        hard_gate_triggered=hard_gate
+        hard_gate_triggered=hard_gate,
+        assessment_id=actual_assessment_id,
+        evidence_ids=[r.evidence_id for r in records]
     )
 
     return {
@@ -52,5 +56,6 @@ def get_cytoscape_graph(investigation_id: str, db: Session = Depends(get_db)):
         "persona_a": inv.target_persona_a,
         "persona_b": inv.target_persona_b,
         "attribution_state": state,
+        "assessment_id": actual_assessment_id,
         "graph": graph_data
     }

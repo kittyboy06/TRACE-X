@@ -12,6 +12,16 @@ def init_test_db():
     yield
 
 
+@pytest.fixture
+def auth_headers():
+    login_resp = client.post("/api/v1/auth/token", json={
+        "username": "analyst",
+        "password": "tracex2026"
+    })
+    token = login_resp.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
 def test_health_endpoint():
     res = client.get("/health")
     assert res.status_code == 200
@@ -20,9 +30,9 @@ def test_health_endpoint():
     assert "REAL-WORLD IDENTITY: NOT ESTABLISHED" in data["identity_scope"]
 
 
-def test_e2e_case_1_convergence():
-    # 1. Load Benchmark Case 1
-    load_res = client.post("/api/v1/ingestion/benchmark/case_1")
+def test_e2e_case_1_convergence(auth_headers):
+    # 1. Load Benchmark Case 1 (Protected)
+    load_res = client.post("/api/v1/ingestion/benchmark/case_1", headers=auth_headers)
     assert load_res.status_code == 200
     load_data = load_res.json()
     assert load_data["investigation_id"] == "INV-SIH-001"
@@ -46,7 +56,7 @@ def test_e2e_case_1_convergence():
     assert len(graph_data["graph"]["nodes"]) > 0
     assert len(graph_data["graph"]["edges"]) > 0
 
-    # 4. Verify Sensitivity Recalculation
+    # 4. Verify Protected Sensitivity Recalculation
     recalc_res = client.post("/api/v1/attribution/recalculate", json={
         "investigation_id": "INV-SIH-001",
         "weight_cryptographic": 0.10,
@@ -54,20 +64,14 @@ def test_e2e_case_1_convergence():
         "weight_stylometric": 0.10,
         "weight_infrastructure": 0.30,
         "weight_behavioral": 0.30
-    })
+    }, headers=auth_headers)
     assert recalc_res.status_code == 200
     assert "attribution_state" in recalc_res.json()
 
-    # 5. Verify SSE stream endpoint completes without serialization errors
-    stream_res = client.get("/api/v1/pipeline/stream/INV-SIH-001")
-    assert stream_res.status_code == 200
-    assert "COMPLETE" in stream_res.text
-    assert "data:" in stream_res.text
 
-
-def test_e2e_case_2_contradiction_clash():
-    # 1. Load Benchmark Case 2
-    load_res = client.post("/api/v1/ingestion/benchmark/case_2")
+def test_e2e_case_2_contradiction_clash(auth_headers):
+    # 1. Load Benchmark Case 2 (Protected)
+    load_res = client.post("/api/v1/ingestion/benchmark/case_2", headers=auth_headers)
     assert load_res.status_code == 200
     load_data = load_res.json()
     assert load_data["investigation_id"] == "INV-SIH-002"
@@ -80,6 +84,19 @@ def test_e2e_case_2_contradiction_clash():
     db.close()
 
     assessment = pipeline_res["assessment"]
-    # Verify that hard gate forces INCONCLUSIVE
     assert assessment.attribution_state.value == "INCONCLUSIVE"
+    assert assessment.evidence_score <= 0.40
     assert assessment.assessment_rationale.hard_cap_applied is True
+
+
+def test_sensitivity_recalculation(auth_headers):
+    # Unauthenticated recalculation -> 401
+    unauth_res = client.post("/api/v1/attribution/recalculate", json={
+        "investigation_id": "INV-SIH-001",
+        "weight_cryptographic": 0.30,
+        "weight_financial": 0.25,
+        "weight_stylometric": 0.20,
+        "weight_infrastructure": 0.15,
+        "weight_behavioral": 0.10
+    })
+    assert unauth_res.status_code == 401

@@ -5,9 +5,19 @@ from app.main import app
 client = TestClient(app)
 
 
-def test_graph_generation_and_source():
-    # 1. Load benchmark 1
-    bench_resp = client.post("/api/v1/ingestion/benchmark/1")
+@pytest.fixture
+def auth_headers():
+    login_resp = client.post("/api/v1/auth/token", json={
+        "username": "analyst",
+        "password": "tracex2026"
+    })
+    token = login_resp.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+def test_graph_generation_and_source(auth_headers):
+    # 1. Load benchmark 1 (Protected)
+    bench_resp = client.post("/api/v1/ingestion/benchmark/1", headers=auth_headers)
     assert bench_resp.status_code == 200
     inv_id = bench_resp.json()["investigation_id"]
 

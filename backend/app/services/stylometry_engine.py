@@ -3,6 +3,7 @@ import os
 import logging
 from typing import List, Dict, Any, Optional, Tuple
 from app.models.schemas import DimensionSignal, SignalStatus, StylometryEngineType
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +14,7 @@ _MODEL_LOAD_FAILED = False
 
 class StylometryEngine:
     MIN_WORD_COUNT = 150
-    DEFAULT_MODEL_NAME = os.getenv("STYLOMETRY_MODEL", "sentence-transformers/all-mpnet-base-v2")
+    DEFAULT_MODEL_NAME = settings.STYLOMETRY_MODEL
 
     @classmethod
     def _get_transformer_model(cls):
@@ -23,18 +24,21 @@ class StylometryEngine:
         if _MODEL_LOAD_FAILED:
             return None
 
-        enable_transformer = os.getenv("ENABLE_REAL_TRANSFORMER", "false").lower() in ["true", "1", "yes"]
-        if not enable_transformer:
+        if not settings.ENABLE_REAL_TRANSFORMER:
             _MODEL_LOAD_FAILED = True
             return None
 
         try:
             from sentence_transformers import SentenceTransformer
-            _TRANSFORMER_MODEL = SentenceTransformer(cls.DEFAULT_MODEL_NAME)
+            # Try loading cached local weights first
+            try:
+                _TRANSFORMER_MODEL = SentenceTransformer(cls.DEFAULT_MODEL_NAME, local_files_only=True)
+            except Exception:
+                _TRANSFORMER_MODEL = SentenceTransformer(cls.DEFAULT_MODEL_NAME)
             logger.info(f"Loaded SentenceTransformer: {cls.DEFAULT_MODEL_NAME}")
             return _TRANSFORMER_MODEL
         except Exception as e:
-            logger.warning(f"Could not load SentenceTransformer ({str(e)}). Falling back to deterministic statistical feature engine.")
+            logger.info(f"SentenceTransformer not cached locally ({str(e)}). Using deterministic statistical feature engine.")
             _MODEL_LOAD_FAILED = True
             return None
 

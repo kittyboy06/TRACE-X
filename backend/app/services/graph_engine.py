@@ -126,14 +126,19 @@ class GraphEngine:
         persona_b: str,
         artifacts: List[Dict[str, Any]],
         attribution_state: str,
-        hard_gate_triggered: bool
+        hard_gate_triggered: bool,
+        assessment_id: Optional[str] = None,
+        evidence_ids: Optional[List[str]] = None
     ) -> bool:
         """
-        Persists comprehensive CTI property graph (Personas, PGP, Forums, Posts, Wallets, VASPs, Infra) into Neo4j via Cypher.
+        Persists CTI property graph into Neo4j via Cypher with precise evidentiary associations.
         """
         driver = cls._get_neo4j_driver()
         if not driver:
             return False
+
+        actual_aid = assessment_id or f"ASSESS-{investigation_id}"
+        actual_eids = evidence_ids or [a.get("evidence_id", "") for a in artifacts if a.get("evidence_id")]
 
         try:
             with driver.session() as session:
@@ -155,7 +160,7 @@ class GraphEngine:
                         session.run(
                             "MERGE (k:PGP_Key {id: $key_id, label: $key_lbl, fingerprint: $fp, type: 'PGP_Key'}) "
                             "MERGE (p:Persona {id: $persona}) "
-                            "MERGE (p)-[:USED {evidence_id: $eid, strength: 'VERY_HIGH'}]->(k)",
+                            "MERGE (p)-[:USED {evidence_id: $eid, strength: 'VERY_HIGH', association: 'VERIFIED_CRYPTOGRAPHIC_KEY'}]->(k)",
                             key_id=f"PGP_{key_id}", key_lbl=f"PGP: {key_id}", fp=raw.get("key_fingerprint", ""), persona=persona, eid=eid
                         )
                     elif art_type == "FORUM_POST":
@@ -165,7 +170,7 @@ class GraphEngine:
                             "MERGE (f:Forum {id: $forum, label: $forum, type: 'Forum'}) "
                             "MERGE (post:Forum_Post {id: $post_id, label: $post_lbl, type: 'Forum_Post', word_count: $wc}) "
                             "MERGE (p:Persona {id: $persona}) "
-                            "MERGE (p)-[:AUTHORED {evidence_id: $eid}]->(post) "
+                            "MERGE (p)-[:AUTHORED {evidence_id: $eid, association: 'VERIFIED_AUTHOR'}]->(post) "
                             "MERGE (post)-[:POSTED_ON]->(f)",
                             forum=f"FORUM_{forum}", post_id=f"POST_{eid}", post_lbl=f"Post ({forum})", wc=raw.get("word_count", 0), persona=persona, eid=eid
                         )
@@ -175,21 +180,29 @@ class GraphEngine:
                             "MERGE (w:Wallet {id: $wid, label: $wlbl, type: 'Wallet', method: $method})",
                             wid=cluster_id, wlbl=f"Wallet: {cluster_id}", method=raw.get("clustering_method", "CIOH")
                         )
-                        # Link Persona A
-                        session.run(
-                            "MERGE (p:Persona {id: $pa}) MERGE (w:Wallet {id: $wid}) "
-                            "MERGE (p)-[:FUNDED_FROM {evidence_id: $eid}]->(w)",
-                            pa=persona_a, wid=cluster_id, eid=eid
-                        )
-                        # Only link Persona B if recipient
+                        # Differentiate verified funder from inferred association
+                        inputs = raw.get("inputs", [])
+                        if any(persona_a.lower() in str(inp).lower() for inp in inputs) or raw.get("persona") == persona_a:
+                            session.run(
+                                "MERGE (p:Persona {id: $pa}) MERGE (w:Wallet {id: $wid}) "
+                                "MERGE (p)-[:FUNDED_FROM {evidence_id: $eid, association: 'VERIFIED_OWNERSHIP', evidence_strength: 'HIGH'}]->(w)",
+                                pa=persona_a, wid=cluster_id, eid=eid
+                            )
+                        else:
+                            session.run(
+                                "MERGE (p:Persona {id: $pa}) MERGE (w:Wallet {id: $wid}) "
+                                "MERGE (p)-[:ASSOCIATED_WITH {evidence_id: $eid, association: 'INFERRED_ASSOCIATION', evidence_strength: 'MEDIUM_HEURISTIC'}]->(w)",
+                                pa=persona_a, wid=cluster_id, eid=eid
+                            )
+
                         outputs = raw.get("outputs", [])
                         if any(persona_b.lower() in str(out).lower() for out in outputs) or raw.get("recipient_persona") == persona_b:
                             session.run(
                                 "MERGE (p:Persona {id: $pb}) MERGE (w:Wallet {id: $wid}) "
-                                "MERGE (w)-[:TRANSFERRED_TO {evidence_id: $eid}]->(p)",
+                                "MERGE (w)-[:TRANSFERRED_TO {evidence_id: $eid, association: 'VERIFIED_RECIPIENT', evidence_strength: 'HIGH'}]->(p)",
                                 pb=persona_b, wid=cluster_id, eid=eid
                             )
-                        # VASP Hops
+
                         for hop in raw.get("hops_to_vasp", []):
                             vasp = hop.get("vasp_entity")
                             if vasp:
@@ -202,27 +215,42 @@ class GraphEngine:
                                 )
                     elif art_type == "INFRASTRUCTURE_HEADER":
                         infra_id = f"INFRA_{eid}"
+                        rare_match = raw.get("rare_fingerprint_match", False)
                         session.run(
-                            "MERGE (i:Infrastructure {id: $iid, label: $ilbl, type: 'Infrastructure'}) "
-                            "MERGE (p1:Persona {id: $pa}) MERGE (p2:Persona {id: $pb}) "
-                            "MERGE (p1)-[:RUNS_ON {evidence_id: $eid}]->(i) "
-                            "MERGE (p2)-[:RUNS_ON {evidence_id: $eid}]->(i)",
-                            iid=infra_id, ilbl=f"Infra: {raw.get('persona_a_infra', {}).get('ssh_banner', 'SSH-Daemon')[:16]}",
-                            pa=persona_a, pb=persona_b, eid=eid
+                            "MERGE (i:Infrastructure {id: $iid, label: $ilbl, type: 'Infrastructure'})",
+                            iid=infra_id, ilbl=f"Infra: {raw.get('persona_a_infra', {}).get('ssh_banner', 'SSH-Daemon')[:16]}"
                         )
+                        # Connect Persona A only if telemetry present
+                        if "persona_a_infra" in raw or raw.get("persona") == persona_a:
+                            session.run(
+                                "MERGE (p1:Persona {id: $pa}) MERGE (i:Infrastructure {id: $iid}) "
+                                "MERGE (p1)-[:RUNS_ON {evidence_id: $eid, association: $assoc, evidence_strength: $str}]->(i)",
+                                pa=persona_a, iid=infra_id, eid=eid,
+                                assoc="VERIFIED_INFRASTRUCTURE" if rare_match else "INFERRED_INFRASTRUCTURE",
+                                str="HIGH" if rare_match else "MEDIUM"
+                            )
+                        # Connect Persona B only if telemetry present
+                        if "persona_b_infra" in raw or raw.get("persona") == persona_b:
+                            session.run(
+                                "MERGE (p2:Persona {id: $pb}) MERGE (i:Infrastructure {id: $iid}) "
+                                "MERGE (p2)-[:RUNS_ON {evidence_id: $eid, association: $assoc, evidence_strength: $str}]->(i)",
+                                pb=persona_b, iid=infra_id, eid=eid,
+                                assoc="VERIFIED_INFRASTRUCTURE" if rare_match else "INFERRED_INFRASTRUCTURE",
+                                str="HIGH" if rare_match else "MEDIUM"
+                            )
 
-                # Merge correlation / conflict relationship between target personas
+                # Merge correlation / conflict relationship with real assessment provenance
                 if hard_gate_triggered:
                     session.run(
                         "MERGE (p1:Persona {id: $p1}) MERGE (p2:Persona {id: $p2}) "
-                        "MERGE (p1)-[:CONFLICTS_WITH {reason: 'TEMPORAL_CONCURRENCY', evidence_strength: 'CONTRADICTORY'}]->(p2)",
-                        p1=persona_a, p2=persona_b
+                        "MERGE (p1)-[:CONFLICTS_WITH {reason: 'TEMPORAL_CONCURRENCY', evidence_strength: 'CONTRADICTORY', assessment_id: $aid, evidence_ids: $eids}]->(p2)",
+                        p1=persona_a, p2=persona_b, aid=actual_aid, eids=actual_eids
                     )
                 else:
                     session.run(
                         "MERGE (p1:Persona {id: $p1}) MERGE (p2:Persona {id: $p2}) "
-                        "MERGE (p1)-[:LIKELY_SAME_AS {state: $state, assessment_id: $aid, evidence_strength: 'HIGH'}]->(p2)",
-                        p1=persona_a, p2=persona_b, state=attribution_state, aid=f"ASSESS-{persona_a}-{persona_b}"
+                        "MERGE (p1)-[:LIKELY_SAME_AS {state: $state, assessment_id: $aid, evidence_ids: $eids, evidence_strength: 'HIGH'}]->(p2)",
+                        p1=persona_a, p2=persona_b, state=attribution_state, aid=actual_aid, eids=actual_eids
                     )
             return True
         except Exception as e:
@@ -300,7 +328,10 @@ class GraphEngine:
                                     "label": r.type,
                                     "evidence_id": r.get("evidence_id"),
                                     "evidence_strength": r.get("evidence_strength", "HIGH"),
-                                    "state": r.get("state")
+                                    "association": r.get("association"),
+                                    "state": r.get("state"),
+                                    "assessment_id": r.get("assessment_id"),
+                                    "evidence_ids": r.get("evidence_ids")
                                 }
                             }
 
@@ -323,13 +354,17 @@ class GraphEngine:
         persona_b: str,
         artifacts: List[Dict[str, Any]],
         attribution_state: str,
-        hard_gate_triggered: bool
+        hard_gate_triggered: bool,
+        assessment_id: Optional[str] = None,
+        evidence_ids: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """
-        Deterministic, local property graph constructor used when Neo4j is offline or unavailable.
+        Deterministic, local property graph constructor with honest evidence semantics.
         """
         nodes = []
         edges = []
+        actual_aid = assessment_id or f"ASSESS-{investigation_id}"
+        actual_eids = evidence_ids or [a.get("evidence_id", "") for a in artifacts if a.get("evidence_id")]
 
         threat_level = "CRITICAL" if attribution_state == "CONFIRMED_LINK" else ("EVALUATING" if hard_gate_triggered else "HIGH")
         nodes.append({
@@ -376,6 +411,7 @@ class GraphEngine:
                         "source": persona,
                         "target": key_node_id,
                         "label": "USED",
+                        "association": "VERIFIED_CRYPTOGRAPHIC_KEY",
                         "evidence_strength": "VERY_HIGH",
                         "evidence_id": eid
                     }
@@ -400,7 +436,7 @@ class GraphEngine:
                 })
                 persona = raw.get("persona", persona_a)
                 edges.append({
-                    "data": {"id": f"e_{persona}_{post_node_id}", "source": persona, "target": post_node_id, "label": "AUTHORED", "evidence_id": eid}
+                    "data": {"id": f"e_{persona}_{post_node_id}", "source": persona, "target": post_node_id, "label": "AUTHORED", "association": "VERIFIED_AUTHOR", "evidence_id": eid}
                 })
                 edges.append({
                     "data": {"id": f"e_{post_node_id}_{forum_node_id}", "source": post_node_id, "target": forum_node_id, "label": "POSTED_ON"}
@@ -418,16 +454,40 @@ class GraphEngine:
                 
                 if any(persona_a.lower() in str(inp).lower() for inp in inputs) or raw.get("persona") == persona_a:
                     edges.append({
-                        "data": {"id": f"e_{persona_a}_{cluster_id}", "source": persona_a, "target": cluster_id, "label": "FUNDED_FROM", "evidence_id": eid}
+                        "data": {
+                            "id": f"e_{persona_a}_{cluster_id}",
+                            "source": persona_a,
+                            "target": cluster_id,
+                            "label": "FUNDED_FROM",
+                            "association": "VERIFIED_OWNERSHIP",
+                            "evidence_strength": "HIGH",
+                            "evidence_id": eid
+                        }
                     })
                 else:
                     edges.append({
-                        "data": {"id": f"e_{persona_a}_{cluster_id}", "source": persona_a, "target": cluster_id, "label": "ASSOCIATED_WITH", "evidence_id": eid}
+                        "data": {
+                            "id": f"e_{persona_a}_{cluster_id}",
+                            "source": persona_a,
+                            "target": cluster_id,
+                            "label": "ASSOCIATED_WITH",
+                            "association": "INFERRED_ASSOCIATION",
+                            "evidence_strength": "MEDIUM_HEURISTIC",
+                            "evidence_id": eid
+                        }
                     })
 
                 if any(persona_b.lower() in str(out).lower() for out in outputs) or raw.get("recipient_persona") == persona_b:
                     edges.append({
-                        "data": {"id": f"e_{cluster_id}_{persona_b}", "source": cluster_id, "target": persona_b, "label": "TRANSFERRED_TO", "evidence_id": eid}
+                        "data": {
+                            "id": f"e_{cluster_id}_{persona_b}",
+                            "source": cluster_id,
+                            "target": persona_b,
+                            "label": "TRANSFERRED_TO",
+                            "association": "VERIFIED_RECIPIENT",
+                            "evidence_strength": "HIGH",
+                            "evidence_id": eid
+                        }
                     })
 
                 for hop in raw.get("hops_to_vasp", []):
@@ -442,16 +502,38 @@ class GraphEngine:
 
             elif art_type == "INFRASTRUCTURE_HEADER":
                 infra_id = f"INFRA_{eid}"
+                rare_match = raw.get("rare_fingerprint_match", False)
                 if not any(n["data"]["id"] == infra_id for n in nodes):
                     nodes.append({
                         "data": {"id": infra_id, "label": f"Infra: {raw.get('persona_a_infra', {}).get('ssh_banner', 'SSH-Daemon')[:16]}", "type": "Infrastructure", "evidence_id": eid}
                     })
-                edges.append({
-                    "data": {"id": f"e_{persona_a}_{infra_id}", "source": persona_a, "target": infra_id, "label": "RUNS_ON", "evidence_id": eid}
-                })
-                edges.append({
-                    "data": {"id": f"e_{persona_b}_{infra_id}", "source": persona_b, "target": infra_id, "label": "RUNS_ON", "evidence_id": eid}
-                })
+                
+                # Attach to Persona A only if telemetry present
+                if "persona_a_infra" in raw or raw.get("persona") == persona_a:
+                    edges.append({
+                        "data": {
+                            "id": f"e_{persona_a}_{infra_id}",
+                            "source": persona_a,
+                            "target": infra_id,
+                            "label": "RUNS_ON",
+                            "association": "VERIFIED_INFRASTRUCTURE" if rare_match else "INFERRED_INFRASTRUCTURE",
+                            "evidence_strength": "HIGH" if rare_match else "MEDIUM",
+                            "evidence_id": eid
+                        }
+                    })
+                # Attach to Persona B only if telemetry present
+                if "persona_b_infra" in raw or raw.get("persona") == persona_b:
+                    edges.append({
+                        "data": {
+                            "id": f"e_{persona_b}_{infra_id}",
+                            "source": persona_b,
+                            "target": infra_id,
+                            "label": "RUNS_ON",
+                            "association": "VERIFIED_INFRASTRUCTURE" if rare_match else "INFERRED_INFRASTRUCTURE",
+                            "evidence_strength": "HIGH" if rare_match else "MEDIUM",
+                            "evidence_id": eid
+                        }
+                    })
 
         if hard_gate_triggered:
             edges.append({
@@ -462,7 +544,8 @@ class GraphEngine:
                     "label": "CONFLICTS_WITH",
                     "evidence_strength": "CONTRADICTORY",
                     "reason": "TEMPORAL_CONCURRENCY",
-                    "evidence_id": "EV-106-TEMPORAL-CLASH"
+                    "assessment_id": actual_aid,
+                    "evidence_ids": actual_eids
                 }
             })
         else:
@@ -474,8 +557,8 @@ class GraphEngine:
                     "label": "LIKELY_SAME_AS",
                     "evidence_strength": "HIGH",
                     "state": attribution_state,
-                    "assessment_id": f"ASSESS-{persona_a}-{persona_b}",
-                    "evidence_ids": [a.get("evidence_id") for a in artifacts if a.get("evidence_id")]
+                    "assessment_id": actual_aid,
+                    "evidence_ids": actual_eids
                 }
             })
 
@@ -493,13 +576,21 @@ class GraphEngine:
         persona_b: str,
         artifacts: List[Dict[str, Any]],
         attribution_state: str,
-        hard_gate_triggered: bool
+        hard_gate_triggered: bool,
+        assessment_id: Optional[str] = None,
+        evidence_ids: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """
         Syncs artifacts to Neo4j and queries the live graph via Cypher.
         Falls back to local property graph generation if Neo4j is offline.
         """
-        cls.sync_to_neo4j(investigation_id, persona_a, persona_b, artifacts, attribution_state, hard_gate_triggered)
+        actual_aid = assessment_id or f"ASSESS-{investigation_id}"
+        actual_eids = evidence_ids or [a.get("evidence_id", "") for a in artifacts if a.get("evidence_id")]
+
+        cls.sync_to_neo4j(
+            investigation_id, persona_a, persona_b, artifacts, attribution_state, hard_gate_triggered,
+            assessment_id=actual_aid, evidence_ids=actual_eids
+        )
         
         # Query Neo4j directly via Cypher
         neo4j_graph = cls.query_neo4j_subgraph(investigation_id, persona_a, persona_b)
@@ -508,5 +599,6 @@ class GraphEngine:
 
         # Fallback
         return cls._build_local_cytoscape_graph(
-            investigation_id, persona_a, persona_b, artifacts, attribution_state, hard_gate_triggered
+            investigation_id, persona_a, persona_b, artifacts, attribution_state, hard_gate_triggered,
+            assessment_id=actual_aid, evidence_ids=actual_eids
         )

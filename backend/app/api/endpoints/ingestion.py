@@ -36,10 +36,15 @@ def validate_artifacts_schema(artifacts: List[Dict[str, Any]]):
 
 
 @router.post("/benchmark/{case_id}")
-def load_benchmark(case_id: str, db: Session = Depends(get_db)):
+def load_benchmark(
+    case_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_role("LEAD_AUDITOR", "CTI_ANALYST"))
+):
     """
     1-Click Benchmark Loader for SIH26151 Presentation.
     Loads Case 1 (Convergence -> LIKELY_LINK) or Case 2 (Contradiction -> INCONCLUSIVE).
+    Requires authenticated analyst/auditor session.
     """
     case_name = f"case_{case_id}" if not case_id.startswith("case_") else case_id
     try:

@@ -9,7 +9,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@phosphor-icons/react": "^2.1.7",
     "axios": "^1.6.8",
     "clsx": "^2.1.0",
     "cytoscape": "^3.28.1",

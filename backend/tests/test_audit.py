@@ -16,8 +16,8 @@ def lead_auditor_headers():
 
 
 def test_append_only_audit_event_and_spoof_prevention(lead_auditor_headers):
-    # 1. Load benchmark 1
-    bench_resp = client.post("/api/v1/ingestion/benchmark/1")
+    # 1. Load benchmark 1 (Protected)
+    bench_resp = client.post("/api/v1/ingestion/benchmark/1", headers=lead_auditor_headers)
     assert bench_resp.status_code == 200
     inv_id = bench_resp.json()["investigation_id"]
 
@@ -65,8 +65,8 @@ def test_append_only_audit_event_and_spoof_prevention(lead_auditor_headers):
 
 
 def test_commit_weights_audit_provenance(lead_auditor_headers):
-    # 1. Load benchmark 1
-    bench_resp = client.post("/api/v1/ingestion/benchmark/1")
+    # 1. Load benchmark 1 (Protected)
+    bench_resp = client.post("/api/v1/ingestion/benchmark/1", headers=lead_auditor_headers)
     assert bench_resp.status_code == 200
     inv_id = bench_resp.json()["investigation_id"]
 

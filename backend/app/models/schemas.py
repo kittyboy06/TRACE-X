@@ -50,6 +50,13 @@ class AnalystDecision(str, Enum):
     INVESTIGATE = "INVESTIGATE"
 
 
+class AuditAction(str, Enum):
+    ANALYST_DECISION = "ANALYST_DECISION"
+    WEIGHTS_COMMITTED = "WEIGHTS_COMMITTED"
+    EVIDENCE_INGESTED = "EVIDENCE_INGESTED"
+    ASSESSMENT_GENERATED = "ASSESSMENT_GENERATED"
+
+
 # Alias for backward compatibility
 AnalystAction = AnalystDecision
 
@@ -170,7 +177,7 @@ class AuditEvent(BaseModel):
     audit_id: str
     investigation_id: str
     assessment_id: str
-    action: AnalystDecision
+    action: str = Field(..., description="Recorded audit action or decision (e.g. CONFIRMED, WEIGHTS_COMMITTED)")
     analyst_id: str
     timestamp: datetime
     rationale: str

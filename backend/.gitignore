@@ -10,6 +10,7 @@ htmlcov/
 
 # Environments & Databases
 .env
+!.env.example
 venv/
 .venv/
 *.db

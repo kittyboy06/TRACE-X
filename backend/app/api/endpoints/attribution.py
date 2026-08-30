@@ -27,10 +27,15 @@ def get_attribution_assessment(investigation_id: str, db: Session = Depends(get_
 
 
 @router.post("/recalculate")
-def recalculate_sensitivity(req: SensitivityAdjustmentRequest, db: Session = Depends(get_db)):
+def recalculate_sensitivity(
+    req: SensitivityAdjustmentRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_role("LEAD_AUDITOR", "CTI_ANALYST"))
+):
     """
     Dynamic live recalculation for the Sensitivity & Contradiction Tuner in the UI.
     Returns an ephemeral preview without overwriting the official baseline assessment.
+    Requires authenticated analyst session.
     """
     record = db.query(AttributionAssessmentModel).filter(
         AttributionAssessmentModel.investigation_id == req.investigation_id

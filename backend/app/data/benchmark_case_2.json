@@ -1,0 +1,98 @@
+{
+  "investigation_id": "INV-SIH-002",
+  "title": "Operation DeceptiveClone: High Stylometry with Concurrency Clash",
+  "target_persona_a": "ShadowBroker_X",
+  "target_persona_b": "PhantomAccess",
+  "narrative": "ShadowBroker_X and PhantomAccess exhibit extremely high linguistic stylometry similarity on initial NLP scans. However, forensic financial traces show extensive Samourai Whirlpool mixing, distinct non-overlapping PGP keys, and hard temporal concurrency showing both personas posting and executing administrative commands at the exact same minute across disparate geolocation nodes.",
+  "artifacts": [
+    {
+      "evidence_id": "EV-101-PGP-SHADOW",
+      "artifact_type": "PGP_KEY",
+      "source_uri": "xss.is/user/shadowbroker_x",
+      "collected_at": "2026-04-10T12:00:00Z",
+      "raw_payload": {
+        "persona": "ShadowBroker_X",
+        "key_fingerprint": "11AA22BB33CC44DD55EE66FF77889900AABBCCDD",
+        "key_id": "0xAABBCCDD",
+        "algorithm": "ED25519"
+      }
+    },
+    {
+      "evidence_id": "EV-102-PGP-PHANTOM",
+      "artifact_type": "PGP_KEY",
+      "source_uri": "breachforums.st/u/phantomaccess",
+      "collected_at": "2026-04-10T12:00:00Z",
+      "raw_payload": {
+        "persona": "PhantomAccess",
+        "key_fingerprint": "99887766554433221100FFEEDDCCBBAA00112233",
+        "key_id": "0x00112233",
+        "algorithm": "RSA-4096"
+      }
+    },
+    {
+      "evidence_id": "EV-103-POSTS-SHADOW",
+      "artifact_type": "FORUM_POST",
+      "source_uri": "xss.is/thread/5012",
+      "collected_at": "2026-05-01T14:30:15Z",
+      "raw_payload": {
+        "persona": "ShadowBroker_X",
+        "forum": "XSS.is",
+        "post_text": "Selling high-tier corporate network access for Fortune 500 manufacturing conglomerate. Domain admin rights fully compromised and persistence verified across dual domain controllers. Initial vector was a spear-phishing payload deploying a custom loader bypassing modern EDR solutions. Bids start at 15 BTC with immediate buyout set at 30 BTC. Escrow is handled through verified platform administrators only. Direct technical inquiries should be submitted via OTR-encrypted Jabber. Proof of access including sanitized Active Directory schema exports and network topology diagrams is available upon request. Serious buyers only. Unverified intermediaries or price bargainers will be blacklisted.",
+        "word_count": 154,
+        "language": "en"
+      }
+    },
+    {
+      "evidence_id": "EV-104-POSTS-PHANTOM",
+      "artifact_type": "FORUM_POST",
+      "source_uri": "breachforums.st/thread/9014",
+      "collected_at": "2026-05-01T14:30:45Z",
+      "raw_payload": {
+        "persona": "PhantomAccess",
+        "forum": "BreachForums",
+        "post_text": "Auctioning exclusive corporate network access for enterprise manufacturing targets. Full Domain admin rights verified with multiple redundant backdoors established across core server infrastructure. Vector established through customized phishing lures with automated credential harvesting. Starting bid 15 BTC with reserve buyout at 30 BTC. Inquire via Jabber/OTR for PGP-signed proof containers. Escrow strictly supported through accredited marketplace staff. Redacted enterprise tree dumps and internal IP subnets can be reviewed by vetted syndicates. Non-serious inquiries and lowball offers will be ignored. Contact our operator for instant engagement.",
+        "word_count": 152,
+        "language": "en"
+      }
+    },
+    {
+      "evidence_id": "EV-105-BTC-MIXING",
+      "artifact_type": "BTC_TRANSACTION",
+      "source_uri": "blockchain/tx/samourai_whirlpool_90",
+      "collected_at": "2026-05-02T18:00:00Z",
+      "raw_payload": {
+        "tx_hash": "e091fa4581bb20984da014fecba",
+        "inputs": ["bc1qshadow991a", "bc1qshadow991b"],
+        "outputs": ["bc1qphantom01", "bc1qphantom02", "bc1qpool03", "bc1qpool04", "bc1qpool05"],
+        "cluster_id": "CL-UNVERIFIED-WHIRLPOOL",
+        "clustering_method": "CIOH_CONTAMINATED",
+        "coinjoin_detected": true,
+        "coinjoin_protocol": "Samourai Whirlpool",
+        "coinjoin_penalty": 0.50,
+        "hops_to_vasp": []
+      }
+    },
+    {
+      "evidence_id": "EV-106-TEMPORAL-CLASH",
+      "artifact_type": "TEMPORAL_BURST",
+      "source_uri": "telemetry/auth_logs/concurrency_proof",
+      "collected_at": "2026-05-01T14:30:30Z",
+      "raw_payload": {
+        "persona_a_active_window": {
+          "timestamp": "2026-05-01T14:30:15Z",
+          "action": "FORUM_ADMIN_BROADCAST",
+          "node_location": "Frankfurt endpoint (Infrastructure Exit Node #412)"
+        },
+        "persona_b_active_window": {
+          "timestamp": "2026-05-01T14:30:45Z",
+          "action": "LIVE_MARKETPLACE_ESCROW_DISPUTE_RESPONSE",
+          "node_location": "Singapore endpoint (Infrastructure Exit Node #109)"
+        },
+        "time_delta_seconds": 30,
+        "concurrent_authenticated_session": true,
+        "conflict_severity": "CRITICAL",
+        "hard_gate_rule": "TEMPORAL_CONCURRENCY_CLASH"
+      }
+    }
+  ]
+}

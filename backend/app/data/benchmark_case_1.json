@@ -1,0 +1,101 @@
+{
+  "investigation_id": "INV-SIH-001",
+  "title": "Operation GhostSpecter: Darknet Market Vendor Migration",
+  "target_persona_a": "KryptonGhost",
+  "target_persona_b": "SpecterOp",
+  "narrative": "KryptonGhost was an active narcotics and exploits vendor on Dread and Hydra. After going dormant in early 2026, SpecterOp appeared on Exploit Forum exhibiting near-identical syntax, referencing the same PGP key ID 0x9B8A7C, and routing UTXO funds through an address cluster terminating at Kraken Exchange.",
+  "artifacts": [
+    {
+      "evidence_id": "EV-001-PGP",
+      "artifact_type": "PGP_KEY",
+      "source_uri": "dread.onion/v/kryptonghost/profile",
+      "collected_at": "2026-01-14T08:30:00Z",
+      "raw_payload": {
+        "persona": "KryptonGhost",
+        "key_fingerprint": "8F9B2D1C9B8A7C44E31055F6A901C4889B8A7C",
+        "key_id": "0x9B8A7C",
+        "algorithm": "RSA-4096",
+        "verified_signatures": ["sig_dread_01", "sig_hydra_04"]
+      }
+    },
+    {
+      "evidence_id": "EV-002-PGP-USE",
+      "artifact_type": "PGP_KEY",
+      "source_uri": "exploit.in/user/specterop",
+      "collected_at": "2026-03-02T14:15:00Z",
+      "raw_payload": {
+        "persona": "SpecterOp",
+        "key_fingerprint": "8F9B2D1C9B8A7C44E31055F6A901C4889B8A7C",
+        "key_id": "0x9B8A7C",
+        "algorithm": "RSA-4096",
+        "verified_signatures": ["sig_exploit_99"]
+      }
+    },
+    {
+      "evidence_id": "EV-003-POSTS-A",
+      "artifact_type": "FORUM_POST",
+      "source_uri": "dread.onion/post/89201",
+      "collected_at": "2026-01-10T19:40:00Z",
+      "raw_payload": {
+        "persona": "KryptonGhost",
+        "forum": "Dread",
+        "post_text": "We provide custom kernel exploit development, stealth lateral movement toolkits, and verified escrow services across major underground networks. Escrow is strictly mandatory for all enterprise orders over 2 BTC. We operate on PGP encryption exclusively for all communications. Do not send unencrypted delivery addresses, cleartext server credentials, or Jabber handles under any circumstances. Respect our standard PGP signing key format. All payloads are compiled against clean kernel targets and delivered via one-time encrypted onion drops with automated verification. Inquiries without valid PGP signatures will be permanently ignored by our automated triage bot. Ensure your public key is uploaded to the keyserver beforehand. Full operational documentation is attached within the signed cryptographic container.",
+        "word_count": 155,
+        "language": "en"
+      }
+    },
+    {
+      "evidence_id": "EV-004-POSTS-B",
+      "artifact_type": "FORUM_POST",
+      "source_uri": "exploit.in/topic/44091",
+      "collected_at": "2026-03-05T11:20:00Z",
+      "raw_payload": {
+        "persona": "SpecterOp",
+        "forum": "Exploit.in",
+        "post_text": "Providing specialized zero-day access vectors, privilege escalation binaries, and custom automated escrow solutions for verified syndicate members. Escrow is mandatory for all transactions above 2 BTC without exception. All orders require full PGP encryption prior to dispatch. Never transmit unencrypted delivery details, remote access credentials, or contact identifiers in open chat channels. Check our official PGP key signature before initiating transfer. Access packages are built against clean system environments and transferred through encrypted ephemeral onion links with checksum verification. Unsigned requests or unencrypted inquiries will be discarded by our operator system. Upload your public key block to the repository prior to engagement. Comprehensive deployment notes are enclosed inside the verified cryptographic archive.",
+        "word_count": 156,
+        "language": "en"
+      }
+    },
+    {
+      "evidence_id": "EV-005-BTC-TX",
+      "artifact_type": "BTC_TRANSACTION",
+      "source_uri": "blockchain/tx/8f7c9e01",
+      "collected_at": "2026-02-18T16:00:00Z",
+      "raw_payload": {
+        "tx_hash": "8f7c9e01b34a1122a0149efc89d1",
+        "inputs": ["1KryptonDepositA", "1KryptonDepositB"],
+        "outputs": ["1SpecterReserve", "1ChangeWalletX"],
+        "cluster_id": "CL-KRYPTON-SPECTER",
+        "clustering_method": "CIOH",
+        "hops_to_vasp": [
+          {"from": "1SpecterReserve", "to": "3PeelingHop1", "amount_btc": 8.4},
+          {"from": "3PeelingHop1", "to": "3KrakenDepositVASP", "amount_btc": 7.9, "vasp_entity": "Kraken Exchange"}
+        ],
+        "coinjoin_detected": true,
+        "coinjoin_penalty": 0.25
+      }
+    },
+    {
+      "evidence_id": "EV-006-INFRA",
+      "artifact_type": "INFRASTRUCTURE_HEADER",
+      "source_uri": "telemetry/network/krypton_specter",
+      "collected_at": "2026-03-01T00:00:00Z",
+      "raw_payload": {
+        "persona_a_infra": {
+          "onion_service": "krypton7x3...onion",
+          "tls_cert_serial": "0x4F92A881",
+          "ssh_banner": "OpenSSH_8.4p1 Debian-5+deb11u1",
+          "http_etag": "W/\"5f89-612a4b\""
+        },
+        "persona_b_infra": {
+          "onion_service": "specter89z...onion",
+          "tls_cert_serial": "0x4F92A881",
+          "ssh_banner": "OpenSSH_8.4p1 Debian-5+deb11u1",
+          "http_etag": "W/\"5f89-612a4b\""
+        },
+        "rare_fingerprint_match": true
+      }
+    }
+  ]
+}

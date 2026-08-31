@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { api } from './services/api';
+import { api, ensureAuthenticatedSession } from './services/api';
 import { AttributionAssessment, CytoscapeGraphData, AnalystAction, AuditEvent } from './types';
 import { Header } from './components/Header';
 import { PipelineProgress } from './components/PipelineProgress';
@@ -114,7 +114,11 @@ export const App: React.FC = () => {
   };
 
   useEffect(() => {
-    runCase('1');
+    const init = async () => {
+      await ensureAuthenticatedSession();
+      runCase('1');
+    };
+    init();
   }, []);
 
   const handleSensitivityChange = async (weights: {

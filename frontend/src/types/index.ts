@@ -120,5 +120,14 @@ export interface AuditEvent {
   rationale: string;
   prior_state: string;
   resulting_state: string;
+  previous_hash?: string;
   event_hash: string;
+}
+
+export interface PipelineProgressEvent {
+  investigation_id: string;
+  stage: string;
+  progress_percentage: number;
+  message: string;
+  timestamp?: string;
 }

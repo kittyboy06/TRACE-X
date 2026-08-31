@@ -77,7 +77,7 @@ class ProvenanceRecord(BaseModel):
     artifact_type: EvidenceType
     raw_payload: Dict[str, Any]
     extractor_version: str = Field(default="v1.4.0")
-    model_version: Optional[str] = Field(default="sentence-transformers/all-mpnet-base-v2")
+    model_version: Optional[str] = Field(default=None, description="Analytical model version utilized for normalization")
     provenance_chain: List[str] = Field(default_factory=lambda: ["RAW_INGEST", "NORMALIZED"])
 
 
@@ -183,6 +183,7 @@ class AuditEvent(BaseModel):
     rationale: str
     prior_state: str = Field(..., description="Prior algorithmic attribution state (e.g. LIKELY_LINK)")
     resulting_state: str = Field(..., description="Resulting operational state (e.g. CONFIRMED, REJECTED)")
+    previous_hash: str = Field(default="GENESIS_ROOT_HASH_0000000000000000", description="Cryptographic hash of the preceding audit event")
     event_hash: str = Field(..., description="Cryptographic SHA-256 fingerprint of the audit record")
 
 

@@ -59,6 +59,7 @@ class AuditEventModel(Base):
     rationale = Column(Text, nullable=False)
     prior_state = Column(String, nullable=False)
     resulting_state = Column(String, nullable=False)
+    previous_hash = Column(String, nullable=False, default="GENESIS_ROOT_HASH_0000000000000000")
     event_hash = Column(String, nullable=False, unique=True)
 
 

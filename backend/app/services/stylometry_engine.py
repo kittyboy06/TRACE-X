@@ -14,6 +14,7 @@ _MODEL_LOAD_FAILED = False
 
 class StylometryEngine:
     MIN_WORD_COUNT = 150
+    MIN_TOKEN_COUNT = 500
     DEFAULT_MODEL_NAME = settings.STYLOMETRY_MODEL
 
     @classmethod
@@ -118,9 +119,14 @@ class StylometryEngine:
         
         words_a = len(text_a.split())
         words_b = len(text_b.split())
+        tokens_a = max(len(text_a) // 4, words_a)
+        tokens_b = max(len(text_b) // 4, words_b)
         
-        # 1. Guardrail check (Minimum 150 words)
-        if words_a < cls.MIN_WORD_COUNT or words_b < cls.MIN_WORD_COUNT:
+        # 1. Dual Guardrail check (Minimum 150 words OR 500 tokens)
+        sufficient_a = (words_a >= cls.MIN_WORD_COUNT) or (tokens_a >= cls.MIN_TOKEN_COUNT)
+        sufficient_b = (words_b >= cls.MIN_WORD_COUNT) or (tokens_b >= cls.MIN_TOKEN_COUNT)
+
+        if not (sufficient_a and sufficient_b):
             return DimensionSignal(
                 dimension_name="stylometric",
                 status=SignalStatus.NOT_ENOUGH_EVIDENCE,
@@ -132,9 +138,15 @@ class StylometryEngine:
                 evidence_ids=[p.get("evidence_id", "") for p in persona_a_posts + persona_b_posts if "evidence_id" in p],
                 supporting_details={
                     "status": "NOT_ENOUGH_EVIDENCE",
-                    "reason": f"Insufficient corpus for statistical stylometry (A: {words_a} words, B: {words_b} words; min required: {cls.MIN_WORD_COUNT})",
+                    "reason": (
+                        f"Insufficient corpus for statistical stylometry "
+                        f"(Persona A: {words_a} words / {tokens_a} tokens, Persona B: {words_b} words / {tokens_b} tokens; "
+                        f"required: >= {cls.MIN_WORD_COUNT} words OR >= {cls.MIN_TOKEN_COUNT} tokens)"
+                    ),
                     "words_persona_a": words_a,
                     "words_persona_b": words_b,
+                    "tokens_persona_a": tokens_a,
+                    "tokens_persona_b": tokens_b,
                     "engine": StylometryEngineType.DETERMINISTIC_FALLBACK.value,
                     "model": None
                 }

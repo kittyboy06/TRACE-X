@@ -37,8 +37,9 @@ def test_append_only_audit_event_and_spoof_prevention(lead_auditor_headers):
     # Identity is securely bound to JWT token (AUDITOR-001)
     assert data1["analyst_id"] == "AUDITOR-001"
     assert "CONFIRMED" in data1["resulting_state"]
+    assert data1["previous_hash"] is not None
 
-    # 3. Record second decision
+    # 3. Record second decision and verify cryptographic hash chaining
     req2 = {
         "investigation_id": inv_id,
         "assessment_id": "ASSESS-001",
@@ -51,6 +52,8 @@ def test_append_only_audit_event_and_spoof_prevention(lead_auditor_headers):
     data2 = resp2.json()
     assert data2["event_hash"] != data1["event_hash"]
     assert data2["resulting_state"] == "UNDER_FURTHER_INVESTIGATION"
+    # Unbroken cryptographic hash chain
+    assert data2["previous_hash"] == data1["event_hash"]
 
     # 4. Test protected export dossier
     # Unauthenticated export -> 401
@@ -62,9 +65,11 @@ def test_append_only_audit_event_and_spoof_prevention(lead_auditor_headers):
     assert dossier_resp.status_code == 200
     dossier = dossier_resp.json()
     assert len(dossier["audit_trail"]) >= 2
+    # Verify chain link between last two events
+    assert dossier["audit_trail"][-1]["previous_hash"] == data1["event_hash"]
 
 
-def test_commit_weights_audit_provenance(lead_auditor_headers):
+def test_commit_weights_audit_provenance_and_validation(lead_auditor_headers):
     # 1. Load benchmark 1 (Protected)
     bench_resp = client.post("/api/v1/ingestion/benchmark/1", headers=lead_auditor_headers)
     assert bench_resp.status_code == 200
@@ -77,7 +82,20 @@ def test_commit_weights_audit_provenance(lead_auditor_headers):
     execute_analysis_pipeline(inv_id, db)
     db.close()
 
-    # 3. Commit tuned weights
+    # 3. Test invalid zero-sum weights rejection
+    zero_req = {
+        "investigation_id": inv_id,
+        "weight_cryptographic": 0.0,
+        "weight_financial": 0.0,
+        "weight_stylometric": 0.0,
+        "weight_infrastructure": 0.0,
+        "weight_behavioral": 0.0
+    }
+    zero_resp = client.post("/api/v1/attribution/recalculate", json=zero_req, headers=lead_auditor_headers)
+    assert zero_resp.status_code == 400
+    assert "greater than zero" in zero_resp.json()["detail"]
+
+    # 4. Commit valid tuned weights
     tune_req = {
         "investigation_id": inv_id,
         "weight_cryptographic": 0.35,
@@ -93,3 +111,4 @@ def test_commit_weights_audit_provenance(lead_auditor_headers):
     assert "audit_event" in commit_data
     assert commit_data["audit_event"]["action"] == "WEIGHTS_COMMITTED"
     assert commit_data["audit_event"]["event_hash"] is not None
+    assert commit_data["audit_event"]["previous_hash"] is not None

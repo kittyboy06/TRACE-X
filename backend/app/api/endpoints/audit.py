@@ -39,7 +39,13 @@ def record_analyst_decision(
     now = datetime.utcnow()
     audit_id = f"AUDIT-{now.strftime('%Y%m%d%H%M%S%f')}-{effective_analyst[-4:]}"
     
-    # Compute immutable event hash
+    # Retrieve previous event hash for cryptographic hash chaining
+    last_event = db.query(AuditEventModel).filter(
+        AuditEventModel.investigation_id == req.investigation_id
+    ).order_by(AuditEventModel.timestamp.desc()).first()
+    previous_hash = last_event.event_hash if last_event else "GENESIS_ROOT_HASH_0000000000000000"
+
+    # Compute immutable event hash bound to previous_hash
     hash_payload = {
         "audit_id": audit_id,
         "investigation_id": req.investigation_id,
@@ -49,7 +55,8 @@ def record_analyst_decision(
         "timestamp": now.isoformat(),
         "rationale": req.rationale,
         "prior_state": prior_state,
-        "resulting_state": resulting_state
+        "resulting_state": resulting_state,
+        "previous_hash": previous_hash
     }
     event_hash = hashlib.sha256(json.dumps(hash_payload, sort_keys=True).encode("utf-8")).hexdigest()
 
@@ -63,6 +70,7 @@ def record_analyst_decision(
         rationale=req.rationale,
         prior_state=prior_state,
         resulting_state=resulting_state,
+        previous_hash=previous_hash,
         event_hash=event_hash
     )
     db.add(db_audit)
@@ -73,12 +81,13 @@ def record_analyst_decision(
         audit_id=audit_id,
         investigation_id=req.investigation_id,
         assessment_id=req.assessment_id,
-        action=req.action,
+        action=req.action.value,
         analyst_id=effective_analyst,
         timestamp=now,
         rationale=req.rationale,
         prior_state=prior_state,
         resulting_state=resulting_state,
+        previous_hash=previous_hash,
         event_hash=event_hash
     )
 
@@ -95,9 +104,10 @@ def export_investigation_dossier(
     """
     inv = db.query(InvestigationModel).filter(InvestigationModel.id == investigation_id).first()
     assess = db.query(AttributionAssessmentModel).filter(
-        AttributionAssessmentModel.investigation_id == investigation_id
+        AttributionAssessmentModel.investigation_id == investigation_id,
+        AttributionAssessmentModel.is_current == True
     ).order_by(AttributionAssessmentModel.created_at.desc()).first()
-    audits = db.query(AuditEventModel).filter(AuditEventModel.investigation_id == investigation_id).all()
+    audits = db.query(AuditEventModel).filter(AuditEventModel.investigation_id == investigation_id).order_by(AuditEventModel.timestamp.asc()).all()
 
     if not inv:
         raise HTTPException(status_code=404, detail="Investigation not found")
@@ -124,6 +134,7 @@ def export_investigation_dossier(
                 "analyst_id": a.analyst_id,
                 "timestamp": a.timestamp.isoformat(),
                 "rationale": a.rationale,
+                "previous_hash": a.previous_hash,
                 "event_hash": a.event_hash
             }
             for a in audits

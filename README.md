@@ -52,16 +52,16 @@ Traditional attribution tools often rely on naive similarity heuristics or black
 │    • Level 2: Global Hard Gate (Temporal Concurrency overrides to Inconclusive)│
 │                                                                             │
 │ 2. Transparent & Reproducible Mathematical Scoring                          │
-│    • Sum of weighted signals equals exactly 1.0 (Case 1 Score: 0.7655)      │
+│    • Configured evidence weights sum to 1.0; Case 1 produces fused score 0.7655 │
 │    • Real-time dynamic sensitivity tuner for analyst what-if analysis        │
 │                                                                             │
 │ 3. Strict Stylometric Statistical Guardrail                                 │
 │    • Enforces minimum 150 words / 500 tokens before calculating embeddings   │
 │    • Returns NOT_ENOUGH_EVIDENCE to separate missing data from dissimilarity│
 │                                                                             │
-│ 4. Append-Only Tamper-Evident SHA-256 Audit Trail                           │
-│    • Human-in-the-loop decisions (CONFIRM/REJECT/INVESTIGATE) logged with   │
-│      cryptographic hashes, analyst ID, and timestamp                        │
+│ 4. Cryptographically Hash-Chained Tamper-Evident Audit Trail                 │
+│    • Human decisions & calibrations chained (event_hash, previous_hash)     │
+│      with analyst JWT identity and immutable timestamp                      │
 │                                                                             │
 │ 5. Permanent Real-World Identity Scope Guard                                │
 │    • UI/API explicitly renders "REAL-WORLD IDENTITY: NOT ESTABLISHED"       │

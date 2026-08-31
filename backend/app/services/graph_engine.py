@@ -68,13 +68,24 @@ def _compute_and_attach_graph_metrics(
 
 class GraphEngine:
     _neo4j_driver = None
-    _neo4j_checked = False
+    _last_connection_attempt = 0.0
+    RETRY_INTERVAL = 30.0
 
     @classmethod
     def _get_neo4j_driver(cls):
-        if cls._neo4j_checked:
-            return cls._neo4j_driver
-        cls._neo4j_checked = True
+        import time
+        now = time.time()
+        if cls._neo4j_driver is not None:
+            try:
+                cls._neo4j_driver.verify_connectivity()
+                return cls._neo4j_driver
+            except Exception:
+                cls._neo4j_driver = None
+
+        if (now - cls._last_connection_attempt) < cls.RETRY_INTERVAL:
+            return None
+
+        cls._last_connection_attempt = now
         try:
             from neo4j import GraphDatabase
             driver = GraphDatabase.driver(
@@ -337,7 +348,7 @@ class GraphEngine:
             with driver.session() as session:
                 cypher = """
                 MATCH (p:Persona)
-                WHERE p.id IN [$pa, $pb] OR p.investigation_id = $inv
+                WHERE p.investigation_id = $inv AND p.id IN [$pa, $pb]
                 OPTIONAL MATCH (p)-[r]-(n)
                 RETURN p, r, n
                 """

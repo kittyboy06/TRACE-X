@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import math
 import hashlib
@@ -13,17 +13,25 @@ from app.models.schemas import (
     DimensionSignal,
     GlobalContradiction
 )
+from app.core.security import require_role, get_current_user, authorize_investigation_access
+from app.services.audit_chain import AuditChainService
 from app.services.fusion_engine import EvidenceFusionEngine
-from app.core.security import require_role
 
 router = APIRouter()
 
 
 @router.get("/{investigation_id}")
-def get_attribution_assessment(investigation_id: str, db: Session = Depends(get_db)):
+def get_attribution_assessment(
+    investigation_id: str,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     """
     Returns the latest official fused attribution assessment for the investigation (is_current=True).
+    Requires authentication and investigation authorization.
     """
+    authorize_investigation_access(investigation_id, current_user, db)
+
     record = db.query(AttributionAssessmentModel).filter(
         AttributionAssessmentModel.investigation_id == investigation_id,
         AttributionAssessmentModel.is_current == True
@@ -99,6 +107,28 @@ def calculate_sensitivity_preview(req: SensitivityAdjustmentRequest, db: Session
 
     global_contras = [GlobalContradiction(**c) for c in old_payload.get("global_contradictions", [])]
 
+    # Invariant: A triggered Level 2 hard gate cannot be bypassed by numeric weight tuning
+    has_hard_gate = (
+        old_payload.get("hard_gate_applied", False)
+        or old_payload.get("assessment_rationale", {}).get("hard_gate_applied", False)
+        or old_payload.get("assessment_rationale", {}).get("hard_cap_applied", False)
+        or any(c.triggers_hard_gate for c in global_contras)
+    )
+    if has_hard_gate and not any(c.triggers_hard_gate for c in global_contras):
+        reason = (
+            old_payload.get("hard_gate_reason")
+            or old_payload.get("assessment_rationale", {}).get("hard_gate_reason")
+            or old_payload.get("assessment_rationale", {}).get("hard_cap_reason")
+            or "Operational hard gate preserved"
+        )
+        global_contras.append(GlobalContradiction(
+            contradiction_type="TEMPORAL_CONCURRENCY_CLASH",
+            severity="CRITICAL",
+            penalty=0.0,
+            triggers_hard_gate=True,
+            detail=reason
+        ))
+
     # Re-run fusion
     updated_assessment = EvidenceFusionEngine.fuse_evidence(
         assessment_id=old_payload["assessment_id"],
@@ -142,6 +172,8 @@ def commit_tuned_weights(
     """
     Persists tuned weights as the official baseline assessment for an investigation with audit provenance.
     """
+    authorize_investigation_access(req.investigation_id, current_user, db)
+
     record = db.query(AttributionAssessmentModel).filter(
         AttributionAssessmentModel.investigation_id == req.investigation_id,
         AttributionAssessmentModel.is_current == True
@@ -157,10 +189,10 @@ def commit_tuned_weights(
         AttributionAssessmentModel.investigation_id == req.investigation_id
     ).update({"is_current": False})
 
-    new_assessment_id = f"ASSESS-{req.investigation_id}-{datetime.utcnow().strftime('%H%M%S%f')}"
+    new_assessment_id = f"ASSESS-{req.investigation_id}-{datetime.now(timezone.utc).strftime('%H%M%S%f')}"
     preview["assessment_id"] = new_assessment_id
     analyst_id = current_user.get("analyst_id", "ANALYST-001")
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     db_assess = AttributionAssessmentModel(
         assessment_id=new_assessment_id,
@@ -168,7 +200,7 @@ def commit_tuned_weights(
         attribution_state=preview["attribution_state"],
         confidence_band=preview["confidence_band"],
         base_score=preview["base_score"],
-        evidence_score=preview["evidence_score"],
+        evidence_score=preview["base_score"],
         real_world_identity="NOT ESTABLISHED",
         is_current=True,
         payload=preview,
@@ -176,46 +208,32 @@ def commit_tuned_weights(
     )
     db.add(db_assess)
 
-    # Retrieve previous event hash for cryptographic hash chaining
-    last_event = db.query(AuditEventModel).filter(
-        AuditEventModel.investigation_id == req.investigation_id
-    ).order_by(AuditEventModel.timestamp.desc()).first()
-    previous_hash = last_event.event_hash if last_event else "GENESIS_ROOT_HASH_0000000000000000"
-
-    audit_id = f"AUDIT-{now.strftime('%Y%m%d%H%M%S%f')}-{analyst_id[-4:]}"
     rationale = (
         f"Analyst calibrated dimension weights (Crypto: {req.weight_cryptographic}, "
         f"Fin: {req.weight_financial}, Style: {req.weight_stylometric}, "
         f"Infra: {req.weight_infrastructure}, Beh: {req.weight_behavioral})"
     )
-    hash_payload = {
-        "audit_id": audit_id,
-        "investigation_id": req.investigation_id,
-        "assessment_id": new_assessment_id,
-        "action": "WEIGHTS_COMMITTED",
-        "analyst_id": analyst_id,
-        "timestamp": now.isoformat(),
-        "rationale": rationale,
-        "prior_state": record.attribution_state,
-        "resulting_state": preview["attribution_state"],
-        "previous_hash": previous_hash
-    }
-    event_hash = hashlib.sha256(json.dumps(hash_payload, sort_keys=True).encode("utf-8")).hexdigest()
 
-    db_audit = AuditEventModel(
-        audit_id=audit_id,
+    # Atomically append audit event within this database session
+    db_audit = AuditChainService.append_event(
+        db=db,
         investigation_id=req.investigation_id,
         assessment_id=new_assessment_id,
         action="WEIGHTS_COMMITTED",
         analyst_id=analyst_id,
-        timestamp=now,
         rationale=rationale,
         prior_state=record.attribution_state,
         resulting_state=preview["attribution_state"],
-        previous_hash=previous_hash,
-        event_hash=event_hash
+        payload_details={"weights": {
+            "cryptographic": req.weight_cryptographic,
+            "financial": req.weight_financial,
+            "stylometric": req.weight_stylometric,
+            "infrastructure": req.weight_infrastructure,
+            "behavioral": req.weight_behavioral,
+        }}
     )
-    db.add(db_audit)
+
+    # Single atomic commit committing assessment and audit event together
     db.commit()
 
     return {
@@ -223,9 +241,9 @@ def commit_tuned_weights(
         "message": f"Tuned weights committed by {analyst_id}",
         "assessment": preview,
         "audit_event": {
-            "audit_id": audit_id,
+            "audit_id": db_audit.audit_id,
             "action": "WEIGHTS_COMMITTED",
-            "previous_hash": previous_hash,
-            "event_hash": event_hash
+            "previous_hash": db_audit.previous_hash,
+            "event_hash": db_audit.event_hash
         }
     }

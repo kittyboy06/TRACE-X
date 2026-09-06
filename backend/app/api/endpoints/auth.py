@@ -70,3 +70,43 @@ def read_current_user_profile(current_user: Dict[str, Any] = Depends(get_current
         "role": current_user.get("role"),
         "analyst_id": current_user.get("analyst_id")
     }
+
+
+class SSETicketRequest(BaseModel):
+    investigation_id: str
+
+
+class SSETicketResponse(BaseModel):
+    ticket: str
+    expires_in: int = 60
+    investigation_id: str
+
+
+@router.post("/sse-ticket", response_model=SSETicketResponse)
+def request_sse_ticket(
+    req: SSETicketRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    db: Any = Depends(lambda: next(__import__("app.models.database", fromlist=["get_db"]).get_db()))
+):
+    """
+    Issues an ephemeral single-use ticket (60-second TTL) for streaming pipeline progress.
+    Avoids transmitting long-lived JWTs in EventSource URLs or access logs.
+    """
+    from app.core.security import authorize_investigation_access
+    from app.services.sse_ticket_service import SSETicketService
+
+    # Enforce investigation authorization (404 if missing, 403 if unauthorized)
+    authorize_investigation_access(req.investigation_id, current_user, db)
+
+    ticket = SSETicketService.create_ticket(
+        investigation_id=req.investigation_id,
+        analyst_id=current_user.get("analyst_id", "ANALYST-001"),
+        role=current_user.get("role", "CTI_ANALYST"),
+        ttl_seconds=60
+    )
+
+    return SSETicketResponse(
+        ticket=ticket.ticket_id,
+        expires_in=60,
+        investigation_id=req.investigation_id
+    )

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api, ensureAuthenticatedSession } from './services/api';
-import { AttributionAssessment, CytoscapeGraphData, AnalystAction, AuditEvent } from './types';
+import { AttributionAssessment, CytoscapeGraphData, AnalystAction, AuditEvent, ExtractedEntityRecord } from './types';
 import { Header } from './components/Header';
 import { PipelineProgress } from './components/PipelineProgress';
 import { VisualizerContainer } from './components/visualizers/VisualizerContainer';
@@ -21,6 +21,7 @@ export const App: React.FC = () => {
   const [assessment, setAssessment] = useState<AttributionAssessment | null>(null);
   const [graphData, setGraphData] = useState<CytoscapeGraphData>({ nodes: [], edges: [] });
   const [artifacts, setArtifacts] = useState<any[]>([]);
+  const [entities, setEntities] = useState<ExtractedEntityRecord[]>([]);
 
   // Pipeline SSE streaming state
   const [isProcessing, setIsProcessing] = useState(false);
@@ -31,11 +32,38 @@ export const App: React.FC = () => {
   // Upload modal state
   const [isUploadOpen, setIsUploadOpen] = useState(false);
 
+  // Stable ID selections for bidirectional drilldown
   const [selectedNodeId, setSelectedNodeId] = useState<string | undefined>();
   const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | undefined>();
 
+  const activeStreamRef = React.useRef<EventSource | null>(null);
+  const hasInitialized = React.useRef(false);
+
+  // Fetch entities & graph for active investigation
+  const loadInvestigationSupportingData = async (invId: string) => {
+    try {
+      const [gRes, eRes, aRes] = await Promise.all([
+        api.getGraph(invId).catch(() => ({ graph: { nodes: [], edges: [] } })),
+        api.getEntities(invId).catch(() => ({ entities: [] })),
+        api.getArtifacts(invId).catch(() => ({ artifacts: [] }))
+      ]);
+      setGraphData(gRes.graph);
+      setEntities(eRes.entities || []);
+      if (aRes.artifacts && aRes.artifacts.length > 0) {
+        setArtifacts(aRes.artifacts);
+      }
+    } catch (e) {
+      console.error('Failed to load supporting investigation data', e);
+    }
+  };
+
   // Run pipeline stream for any investigation
   const startPipelineStream = (invId: string) => {
+    if (activeStreamRef.current) {
+      activeStreamRef.current.close();
+      activeStreamRef.current = null;
+    }
+
     setIsProcessing(true);
     setProgressStage('EVIDENCE_INGESTION');
     setProgressPct(15);
@@ -54,22 +82,18 @@ export const App: React.FC = () => {
         setPersonaB(completedAssessment.target_persona_b);
         setProgressStage('COMPLETE');
         setProgressPct(100);
-        setProgressMsg(`Attribution finalized: ${completedAssessment.attribution_state} (Score: ${completedAssessment.evidence_score})`);
+        setProgressMsg(`Attribution finalized: ${completedAssessment.attribution_state} (S_base: ${completedAssessment.base_score.toFixed(4)})`);
         setIsProcessing(false);
 
-        // Fetch property graph data
-        try {
-          const gRes = await api.getGraph(invId);
-          setGraphData(gRes.graph);
-        } catch (e) {
-          console.error('Failed to load graph payload', e);
-        }
+        await loadInvestigationSupportingData(invId);
       },
       (err) => {
         console.error('Pipeline SSE stream error', err);
         setIsProcessing(false);
       }
-    );
+    ).then(es => {
+      if (es) activeStreamRef.current = es;
+    });
   };
 
   // Load benchmark case and trigger pipeline
@@ -114,6 +138,8 @@ export const App: React.FC = () => {
   };
 
   useEffect(() => {
+    if (hasInitialized.current) return;
+    hasInitialized.current = true;
     const init = async () => {
       await ensureAuthenticatedSession();
       runCase('1');
@@ -121,37 +147,9 @@ export const App: React.FC = () => {
     init();
   }, []);
 
-  const handleSensitivityChange = async (weights: {
-    crypto: number;
-    financial: number;
-    stylometry: number;
-    infra: number;
-    behavior: number;
-  }) => {
-    if (!assessment) return;
-    try {
-      const updated = await api.recalculateSensitivity({
-        investigation_id: investigationId,
-        weight_cryptographic: weights.crypto,
-        weight_financial: weights.financial,
-        weight_stylometric: weights.stylometry,
-        weight_infrastructure: weights.infra,
-        weight_behavioral: weights.behavior
-      });
-      setAssessment(updated);
-    } catch (err) {
-      console.error('Sensitivity recalculation failed', err);
-    }
-  };
-
   const handleResetSensitivity = () => {
-    handleSensitivityChange({
-      crypto: 0.30,
-      financial: 0.25,
-      stylometry: 0.20,
-      infra: 0.15,
-      behavior: 0.10
-    });
+    if (!investigationId) return;
+    runCase(activeCase === '2' ? '2' : '1');
   };
 
   const handleRecordDecision = async (action: AnalystAction, rationale: string): Promise<AuditEvent> => {
@@ -165,18 +163,27 @@ export const App: React.FC = () => {
     });
   };
 
-  const handleExportDossier = async () => {
+  const handleExportPdf = async () => {
     try {
-      const dossier = await api.exportDossier(investigationId);
-      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(dossier, null, 2));
-      const downloadAnchor = document.createElement('a');
-      downloadAnchor.setAttribute("href", dataStr);
-      downloadAnchor.setAttribute("download", `TRACE-X_Dossier_${investigationId}.json`);
-      document.body.appendChild(downloadAnchor);
-      downloadAnchor.click();
-      downloadAnchor.remove();
+      await api.downloadDossierPdf(investigationId);
     } catch (err) {
-      alert('Failed to export investigation dossier.');
+      alert('Failed to generate PDF dossier.');
+    }
+  };
+
+  const handleExportCsv = async () => {
+    try {
+      await api.downloadDossierCsv(investigationId);
+    } catch (err) {
+      alert('Failed to generate CSV export.');
+    }
+  };
+
+  const handleExportJson = async () => {
+    try {
+      await api.downloadDossierJson(investigationId);
+    } catch (err) {
+      alert('Failed to export JSON dossier.');
     }
   };
 
@@ -189,7 +196,10 @@ export const App: React.FC = () => {
         personaB={personaB}
         activeCase={activeCase}
         onSelectCase={runCase}
-        onExport={handleExportDossier}
+        onExportPdf={handleExportPdf}
+        onExportCsv={handleExportCsv}
+        onExportJson={handleExportJson}
+        onExport={handleExportPdf}
         onOpenUpload={() => setIsUploadOpen(true)}
         isProcessing={isProcessing}
       />
@@ -210,18 +220,29 @@ export const App: React.FC = () => {
             <VisualizerContainer
               graphData={graphData}
               assessment={assessment}
+              investigationId={investigationId}
+              selectedNodeId={selectedNodeId}
               onSelectNode={(nodeId) => {
                 setSelectedNodeId(nodeId);
-                const cleanId = nodeId.replace(/^PGP_/, '').replace(/^POST_/, '').replace(/^FORUM_/, '').replace(/^INFRA_/, '');
-                const art = artifacts.find(a => 
-                  a.evidence_id === nodeId || 
-                  a.raw_payload?.key_id === cleanId || 
-                  a.raw_payload?.key_id === nodeId ||
+                // Stable ID lookup across entities and artifacts
+                const matchedEnt = entities.find(e => e.entity_id === nodeId);
+                if (matchedEnt) {
+                  setSelectedEvidenceId(matchedEnt.evidence_id);
+                  return;
+                }
+                const matchedArt = artifacts.find(a => a.evidence_id === nodeId);
+                if (matchedArt) {
+                  setSelectedEvidenceId(matchedArt.evidence_id);
+                  return;
+                }
+                // Prefix-agnostic fallback
+                const cleanId = nodeId.replace(/^(PGP_|POST_|FORUM_|INFRA_|WALLET_|VASP_)/, '');
+                const fallbackArt = artifacts.find(a =>
                   a.evidence_id === cleanId ||
-                  `POST_${a.evidence_id}` === nodeId ||
-                  `INFRA_${a.evidence_id}` === nodeId
+                  a.raw_payload?.key_id === cleanId ||
+                  a.raw_payload?.key_fingerprint === cleanId
                 );
-                if (art) setSelectedEvidenceId(art.evidence_id);
+                if (fallbackArt) setSelectedEvidenceId(fallbackArt.evidence_id);
               }}
             />
           ) : (
@@ -244,7 +265,16 @@ export const App: React.FC = () => {
               <SensitivityTuner
                 investigationId={investigationId}
                 dimensions={assessment.evidence_dimensions}
-                onWeightsChange={handleSensitivityChange}
+                baseScore={assessment.base_score}
+                hardGateApplied={assessment.hard_gate_applied}
+                onPreviewChange={(preview) => {
+                  setAssessment(preview);
+                }}
+                onCommitSuccess={async (newAssess, _auditEvent) => {
+                  setAssessment(newAssess);
+                  // Refresh authoritative state and graph from backend
+                  await loadInvestigationSupportingData(investigationId);
+                }}
                 onReset={handleResetSensitivity}
               />
               <AnalystActions
@@ -264,7 +294,12 @@ export const App: React.FC = () => {
       {/* Bottom Collapsible Evidence Drawer */}
       <EvidenceDrawer
         artifacts={artifacts}
+        entities={entities}
         selectedEvidenceId={selectedEvidenceId}
+        selectedEntityId={selectedNodeId}
+        realWorldIdentity={assessment?.real_world_identity}
+        onSelectEvidence={(evId) => setSelectedEvidenceId(evId)}
+        onSelectEntity={(entId) => setSelectedNodeId(entId)}
       />
 
       {/* Live Evidence Ingestion Modal */}

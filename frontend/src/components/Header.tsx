@@ -1,5 +1,5 @@
-import React from 'react';
-import { Shield, FileText, Play, UploadCloud, CheckCircle2, AlertTriangle } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Shield, FileText, UploadCloud, AlertTriangle, ChevronDown, Table, Code } from 'lucide-react';
 
 interface HeaderProps {
   investigationId: string;
@@ -7,6 +7,9 @@ interface HeaderProps {
   personaB: string;
   activeCase: string;
   onSelectCase: (caseId: string) => void;
+  onExportPdf?: () => void;
+  onExportCsv?: () => void;
+  onExportJson?: () => void;
   onExport: () => void;
   onOpenUpload: () => void;
   isProcessing: boolean;
@@ -18,10 +21,42 @@ export const Header: React.FC<HeaderProps> = ({
   personaB,
   activeCase,
   onSelectCase,
+  onExportPdf,
+  onExportCsv,
+  onExportJson,
   onExport,
   onOpenUpload,
   isProcessing
 }) => {
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setIsExportMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const triggerExportPdf = () => {
+    setIsExportMenuOpen(false);
+    if (onExportPdf) onExportPdf();
+    else onExport();
+  };
+
+  const triggerExportCsv = () => {
+    setIsExportMenuOpen(false);
+    if (onExportCsv) onExportCsv();
+  };
+
+  const triggerExportJson = () => {
+    setIsExportMenuOpen(false);
+    if (onExportJson) onExportJson();
+    else onExport();
+  };
   return (
     <header className="bg-slate-900 border-b border-slate-800 px-4 py-2.5 flex items-center justify-between shadow-md">
       {/* Brand & Active Investigation */}
@@ -63,7 +98,7 @@ export const Header: React.FC<HeaderProps> = ({
       {/* Permanent Identity Scope Guard */}
       <div className="hidden lg:flex items-center bg-slate-950/80 border border-amber-500/30 px-3 py-1 rounded-md text-xs font-mono text-amber-300/90 shadow-inner">
         <AlertTriangle className="w-3.5 h-3.5 text-amber-400 mr-1.5 shrink-0" />
-        <span>LEGAL SCOPE: <strong className="text-amber-200">REAL-WORLD IDENTITY: NOT ESTABLISHED</strong> (Subpoena Required)</span>
+        <span>LEGAL SCOPE: <strong className="text-amber-200">REAL-WORLD IDENTITY: NOT ESTABLISHED</strong> (Investigative Decision Support)</span>
       </div>
 
       {/* Actions & 1-Click Benchmark Picker */}
@@ -102,14 +137,62 @@ export const Header: React.FC<HeaderProps> = ({
           <span>Upload</span>
         </button>
 
-        <button
-          onClick={onExport}
-          className="flex items-center space-x-1.5 px-3 py-1 bg-cyan-600 hover:bg-cyan-500 text-white rounded-md text-xs font-medium transition shadow-sm"
-          title="Export Tamper-Evident Audit Dossier"
-        >
-          <FileText className="w-3.5 h-3.5" />
-          <span>Export Dossier</span>
-        </button>
+        {/* Multi-Format Dossier Export Split Button */}
+        <div className="relative inline-flex items-center rounded-md shadow-sm" ref={menuRef}>
+          <button
+            onClick={triggerExportPdf}
+            className="flex items-center space-x-1.5 px-3 py-1 bg-cyan-600 hover:bg-cyan-500 text-white rounded-l-md text-xs font-medium transition border-r border-cyan-700/60 shadow-sm"
+            title="Export Publication-Grade PDF Dossier"
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>Export Dossier</span>
+          </button>
+          <button
+            onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
+            className="px-1.5 py-1 bg-cyan-600 hover:bg-cyan-500 text-white rounded-r-md text-xs font-medium transition shadow-sm"
+            title="Select Dossier Export Format (PDF, CSV, JSON)"
+          >
+            <ChevronDown className="w-3.5 h-3.5" />
+          </button>
+
+          {isExportMenuOpen && (
+            <div className="absolute right-0 top-full mt-1 w-56 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl z-50 py-1 font-sans text-xs">
+              <div className="px-3 py-1.5 border-b border-slate-800 text-[11px] font-semibold text-slate-400">
+                FORENSIC EXPORT FORMATS
+              </div>
+              <button
+                onClick={triggerExportPdf}
+                className="w-full text-left px-3 py-2 text-slate-200 hover:bg-cyan-950/50 hover:text-cyan-300 flex items-center space-x-2.5 transition"
+              >
+                <FileText className="w-4 h-4 text-cyan-400 shrink-0" />
+                <div>
+                  <div className="font-medium">Official Dossier (PDF)</div>
+                  <div className="text-[10px] text-slate-400 font-mono">Publication grade with radar & audit ledger</div>
+                </div>
+              </button>
+              <button
+                onClick={triggerExportCsv}
+                className="w-full text-left px-3 py-2 text-slate-200 hover:bg-cyan-950/50 hover:text-cyan-300 flex items-center space-x-2.5 transition"
+              >
+                <Table className="w-4 h-4 text-emerald-400 shrink-0" />
+                <div>
+                  <div className="font-medium">Tabular Data (CSV)</div>
+                  <div className="text-[10px] text-slate-400 font-mono">Deterministic multi-section tables</div>
+                </div>
+              </button>
+              <button
+                onClick={triggerExportJson}
+                className="w-full text-left px-3 py-2 text-slate-200 hover:bg-cyan-950/50 hover:text-cyan-300 flex items-center space-x-2.5 transition"
+              >
+                <Code className="w-4 h-4 text-amber-400 shrink-0" />
+                <div>
+                  <div className="font-medium">Canonical Model (JSON)</div>
+                  <div className="text-[10px] text-slate-400 font-mono">SHA-256 report_hash & raw signals</div>
+                </div>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </header>
   );

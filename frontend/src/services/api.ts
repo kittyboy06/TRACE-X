@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { AttributionAssessment, CytoscapeGraphData, AuditEvent } from '../types';
+import { AttributionAssessment, CytoscapeGraphData, AuditEvent, SourceReliabilityRecord, ExtractedEntityRecord } from '../types';
 
 const API_BASE = '/api/v1';
 
@@ -146,40 +146,126 @@ export const api = {
 
   async exportDossier(investigationId: string): Promise<any> {
     await ensureAuthenticatedSession();
-    const res = await axios.get(`${API_BASE}/audit/export/${investigationId}`);
+    const res = await axios.get(`${API_BASE}/reports/${investigationId}/json`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('tracex_token')}` }
+    });
     return res.data;
   },
 
-  subscribeToPipeline(
+  async downloadDossierPdf(investigationId: string): Promise<void> {
+    await ensureAuthenticatedSession();
+    const token = localStorage.getItem('tracex_token');
+    const response = await axios.get(`${API_BASE}/reports/${investigationId}/pdf`, {
+      headers: { Authorization: `Bearer ${token}` },
+      responseType: 'blob'
+    });
+    const blob = new Blob([response.data], { type: 'application/pdf' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `TRACE-X_Dossier_${investigationId}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
+
+  async downloadDossierCsv(investigationId: string): Promise<void> {
+    await ensureAuthenticatedSession();
+    const token = localStorage.getItem('tracex_token');
+    const response = await axios.get(`${API_BASE}/reports/${investigationId}/csv`, {
+      headers: { Authorization: `Bearer ${token}` },
+      responseType: 'blob'
+    });
+    const blob = new Blob([response.data], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `TRACE-X_Dossier_${investigationId}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
+
+  async downloadDossierJson(investigationId: string): Promise<void> {
+    await ensureAuthenticatedSession();
+    const token = localStorage.getItem('tracex_token');
+    const response = await axios.get(`${API_BASE}/reports/${investigationId}/json`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const jsonStr = JSON.stringify(response.data, null, 2);
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `TRACE-X_Dossier_${investigationId}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
+
+  async createSseTicket(investigationId: string): Promise<{ ticket: string; expires_in: number; investigation_id: string }> {
+    return this.getSSETicket(investigationId);
+  },
+
+  async getSSETicket(investigationId: string): Promise<{ ticket: string; expires_in: number; investigation_id: string }> {
+    await ensureAuthenticatedSession();
+    const res = await axios.post(
+      `${API_BASE}/auth/sse-ticket`,
+      { investigation_id: investigationId },
+      { headers: { Authorization: `Bearer ${localStorage.getItem('tracex_token')}` } }
+    );
+    return res.data;
+  },
+
+  async getSourceReliability(investigationId: string): Promise<{ investigation_id: string; count: number; sources: SourceReliabilityRecord[] }> {
+    await ensureAuthenticatedSession();
+    const res = await axios.get(`${API_BASE}/reliability/${investigationId}/sources`);
+    return res.data;
+  },
+
+  async getEntities(investigationId: string): Promise<{ investigation_id: string; count: number; entities: ExtractedEntityRecord[] }> {
+    await ensureAuthenticatedSession();
+    const res = await axios.get(`${API_BASE}/ingestion/${investigationId}/entities`);
+    return res.data;
+  },
+
+  async subscribeToPipeline(
     investigationId: string,
     onProgress: (event: any) => void,
     onComplete: (assessment: AttributionAssessment) => void,
     onError?: (error: any) => void
   ) {
-    const token = localStorage.getItem('tracex_token');
-    const eventSource = new EventSource(
-      `${API_BASE}/pipeline/stream/${investigationId}${token ? `?token=${encodeURIComponent(token)}` : ''}`
-    );
+    try {
+      const { ticket } = await this.createSseTicket(investigationId);
+      const eventSource = new EventSource(
+        `${API_BASE}/pipeline/stream/${investigationId}?ticket=${encodeURIComponent(ticket)}`
+      );
 
-    eventSource.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        if (data.stage === 'COMPLETE' && data.assessment) {
-          onComplete(data.assessment);
-          eventSource.close();
-        } else {
-          onProgress(data);
+      eventSource.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data.stage === 'COMPLETE' && data.assessment) {
+            onComplete(data.assessment);
+            eventSource.close();
+          } else {
+            onProgress(data);
+          }
+        } catch (err) {
+          console.error('Error parsing SSE event', err);
         }
-      } catch (err) {
-        console.error('Error parsing SSE event', err);
-      }
-    };
+      };
 
-    eventSource.onerror = (err) => {
+      eventSource.onerror = (err) => {
+        if (onError) onError(err);
+        eventSource.close();
+      };
+
+      return eventSource;
+    } catch (err) {
       if (onError) onError(err);
-      eventSource.close();
-    };
-
-    return eventSource;
+    }
   }
 };

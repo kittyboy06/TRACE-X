@@ -1,12 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
-import json
 
 from app.models.database import get_db, AuditEventModel, AttributionAssessmentModel, InvestigationModel
 from app.models.schemas import AuditDecisionRequest, AuditEvent
-from app.core.security import require_role
+from app.core.security import require_role, get_current_user, authorize_investigation_access
+from app.services.audit_chain import AuditChainService
 
 router = APIRouter()
 
@@ -19,8 +19,10 @@ def record_analyst_decision(
 ):
     """
     Records an append-only, tamper-evident audit record of the analyst's decision.
-    Requires authenticated CTI_ANALYST or LEAD_AUDITOR role.
+    Analyst identity is strictly derived server-side from JWT claims.
     """
+    authorize_investigation_access(req.investigation_id, current_user, db)
+
     assess = db.query(AttributionAssessmentModel).filter(
         AttributionAssessmentModel.assessment_id == req.assessment_id
     ).first()
@@ -34,62 +36,57 @@ def record_analyst_decision(
     elif req.action.value == "INVESTIGATE":
         resulting_state = "UNDER_FURTHER_INVESTIGATION"
 
-    # Authoritative analyst identity bound to verified JWT token claims
     effective_analyst = current_user.get("analyst_id", "ANALYST-001")
-    now = datetime.utcnow()
-    audit_id = f"AUDIT-{now.strftime('%Y%m%d%H%M%S%f')}-{effective_analyst[-4:]}"
-    
-    # Retrieve previous event hash for cryptographic hash chaining
-    last_event = db.query(AuditEventModel).filter(
-        AuditEventModel.investigation_id == req.investigation_id
-    ).order_by(AuditEventModel.timestamp.desc()).first()
-    previous_hash = last_event.event_hash if last_event else "GENESIS_ROOT_HASH_0000000000000000"
 
-    # Compute immutable event hash bound to previous_hash
-    hash_payload = {
-        "audit_id": audit_id,
-        "investigation_id": req.investigation_id,
-        "assessment_id": req.assessment_id,
-        "action": req.action.value,
-        "analyst_id": effective_analyst,
-        "timestamp": now.isoformat(),
-        "rationale": req.rationale,
-        "prior_state": prior_state,
-        "resulting_state": resulting_state,
-        "previous_hash": previous_hash
-    }
-    event_hash = hashlib.sha256(json.dumps(hash_payload, sort_keys=True).encode("utf-8")).hexdigest()
-
-    db_audit = AuditEventModel(
-        audit_id=audit_id,
+    # Append audit event using canonical hash-chaining service (does not commit)
+    db_audit = AuditChainService.append_event(
+        db=db,
         investigation_id=req.investigation_id,
         assessment_id=req.assessment_id,
         action=req.action.value,
         analyst_id=effective_analyst,
-        timestamp=now,
         rationale=req.rationale,
         prior_state=prior_state,
-        resulting_state=resulting_state,
-        previous_hash=previous_hash,
-        event_hash=event_hash
+        resulting_state=resulting_state
     )
-    db.add(db_audit)
+
+    # Atomic commit
     db.commit()
     db.refresh(db_audit)
 
     return AuditEvent(
-        audit_id=audit_id,
-        investigation_id=req.investigation_id,
-        assessment_id=req.assessment_id,
-        action=req.action.value,
-        analyst_id=effective_analyst,
-        timestamp=now,
-        rationale=req.rationale,
-        prior_state=prior_state,
-        resulting_state=resulting_state,
-        previous_hash=previous_hash,
-        event_hash=event_hash
+        audit_id=db_audit.audit_id,
+        investigation_id=db_audit.investigation_id,
+        assessment_id=db_audit.assessment_id,
+        action=db_audit.action,
+        analyst_id=db_audit.analyst_id,
+        timestamp=db_audit.timestamp,
+        rationale=db_audit.rationale,
+        prior_state=db_audit.prior_state,
+        resulting_state=db_audit.resulting_state,
+        previous_hash=db_audit.previous_hash,
+        event_hash=db_audit.event_hash
     )
+
+
+@router.get("/verify/{investigation_id}")
+def verify_audit_chain(
+    investigation_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_role("LEAD_AUDITOR", "CTI_ANALYST"))
+):
+    """
+    Cryptographically verifies the investigation's audit chain from genesis to terminal hash.
+    """
+    authorize_investigation_access(investigation_id, current_user, db)
+    is_valid, records, error = AuditChainService.verify_investigation_chain(investigation_id, db)
+    return {
+        "investigation_id": investigation_id,
+        "is_valid": is_valid,
+        "event_count": len(records),
+        "terminal_hash": records[-1]["event_hash"] if records else "0" * 64,
+        "error": error
+    }
 
 
 @router.get("/export/{investigation_id}")
@@ -100,24 +97,27 @@ def export_investigation_dossier(
 ):
     """
     Exports a comprehensive, tamper-evident audit dossier of the entire investigation.
-    Requires authenticated CTI_ANALYST or LEAD_AUDITOR role.
+    Requires authenticated CTI_ANALYST or LEAD_AUDITOR role with investigation authorization.
     """
-    inv = db.query(InvestigationModel).filter(InvestigationModel.id == investigation_id).first()
+    inv = authorize_investigation_access(investigation_id, current_user, db)
+
     assess = db.query(AttributionAssessmentModel).filter(
         AttributionAssessmentModel.investigation_id == investigation_id,
         AttributionAssessmentModel.is_current == True
     ).order_by(AttributionAssessmentModel.created_at.desc()).first()
+    
+    is_valid, records, error = AuditChainService.verify_investigation_chain(investigation_id, db)
     audits = db.query(AuditEventModel).filter(AuditEventModel.investigation_id == investigation_id).order_by(AuditEventModel.timestamp.asc()).all()
 
-    if not inv:
-        raise HTTPException(status_code=404, detail="Investigation not found")
-
+    now_iso = datetime.now(timezone.utc).isoformat()
     return {
         "export_metadata": {
             "system": "TRACE-X (Threat Relationship & Attribution Correlation Engine)",
             "compliance_standard": "NTRO SIH26151 Evidentiary Framework",
-            "exported_at": datetime.utcnow().isoformat(),
-            "export_hash": hashlib.sha256(f"{investigation_id}:{datetime.utcnow().isoformat()}".encode("utf-8")).hexdigest()
+            "exported_at": now_iso,
+            "export_hash": hashlib.sha256(f"{investigation_id}:{now_iso}".encode("utf-8")).hexdigest(),
+            "audit_chain_valid": is_valid,
+            "audit_chain_error": error
         },
         "investigation": {
             "id": inv.id,
@@ -132,7 +132,7 @@ def export_investigation_dossier(
                 "audit_id": a.audit_id,
                 "action": a.action,
                 "analyst_id": a.analyst_id,
-                "timestamp": a.timestamp.isoformat(),
+                "timestamp": a.timestamp.isoformat() if hasattr(a.timestamp, "isoformat") else str(a.timestamp),
                 "rationale": a.rationale,
                 "previous_hash": a.previous_hash,
                 "event_hash": a.event_hash

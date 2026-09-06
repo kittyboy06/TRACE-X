@@ -1,6 +1,6 @@
 import hashlib
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Tuple
 from sqlalchemy.orm import Session
 
@@ -10,11 +10,14 @@ from app.models.schemas import (
     SignalStatus
 )
 from app.models.database import EvidenceRecordModel, InvestigationModel
+from app.services.normalization_service import NormalizationService
+from app.services.entity_extraction_service import EntityExtractionService
+from app.services.collectors.benchmark_collector import BenchmarkCollector
 
 
 def compute_sha256(data: Dict[str, Any]) -> str:
     """Computes deterministic SHA-256 hash of JSON serializable dictionary."""
-    normalized_json = json.dumps(data, sort_keys=True, separators=(",", ":"))
+    normalized_json = json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(normalized_json.encode("utf-8")).hexdigest()
 
 
@@ -26,82 +29,63 @@ class IngestionService:
         artifact: Dict[str, Any]
     ) -> ProvenanceRecord:
         """
-        Validates artifact, computes SHA-256, assigns provenance metadata,
-        and saves it immutably to the database.
+        Normalizes raw artifact into immutable NormalizedArtifact contract,
+        computes deterministic content_hash and evidence_id, enforces
+        database deduplication on (investigation_id, content_hash), and extracts
+        discrete technical indicators into ExtractedEntity models.
         """
-        raw_payload = artifact.get("raw_payload", {})
-        content_hash = compute_sha256(raw_payload)
-        
-        evidence_id = artifact.get("evidence_id") or f"EV-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}-{content_hash[:6]}"
-        collected_at_str = artifact.get("collected_at")
-        collected_at = datetime.fromisoformat(collected_at_str.replace("Z", "+00:00")) if collected_at_str else datetime.utcnow()
-        
-        record = ProvenanceRecord(
-            evidence_id=evidence_id,
-            investigation_id=investigation_id,
-            source_uri=artifact.get("source_uri", "unknown/source"),
-            collected_at=collected_at,
-            content_hash=content_hash,
-            artifact_type=EvidenceType(artifact.get("artifact_type", "FORUM_POST")),
-            raw_payload=raw_payload,
-            extractor_version=artifact.get("extractor_version", "v1.4.0"),
-            model_version=artifact.get("model_version", "sentence-transformers/all-mpnet-base-v2"),
-            provenance_chain=["RAW_INGEST", "NORMALIZED"]
+        normalized_art = NormalizationService.normalize_artifact(artifact, investigation_id)
+        db_model, is_new = NormalizationService.persist_normalized_artifact(
+            db=db,
+            artifact=normalized_art,
+            extractor_version=artifact.get("extractor_version", "v2.0"),
+            provenance_chain=artifact.get("provenance_chain") or ["RAW_INGEST", "NORMALIZED"]
         )
-        
-        # Check if already exists in this investigation
-        existing = db.query(EvidenceRecordModel).filter(
-            EvidenceRecordModel.investigation_id == investigation_id,
-            EvidenceRecordModel.content_hash == content_hash
-        ).first()
-        if not existing:
-            db_model = EvidenceRecordModel(
-                evidence_id=record.evidence_id,
-                investigation_id=record.investigation_id,
-                source_uri=record.source_uri,
-                artifact_type=record.artifact_type.value,
-                collected_at=record.collected_at,
-                content_hash=record.content_hash,
-                raw_payload=record.raw_payload,
-                extractor_version=record.extractor_version,
-                model_version=record.model_version,
-                provenance_chain=record.provenance_chain
-            )
-            db.add(db_model)
-            db.commit()
-            db.refresh(db_model)
-            
-        return record
+
+        # Extract and persist discrete technical indicators
+        entities = EntityExtractionService.extract_entities(normalized_art)
+        EntityExtractionService.persist_entities(db, entities, investigation_id)
+
+        return ProvenanceRecord(
+            evidence_id=normalized_art.evidence_id,
+            investigation_id=normalized_art.investigation_id,
+            source_uri=normalized_art.source_uri,
+            collected_at=normalized_art.collected_at,
+            content_hash=normalized_art.content_hash,
+            artifact_type=EvidenceType(normalized_art.artifact_type.value),
+            raw_payload=normalized_art.raw_payload,
+            extractor_version=db_model.extractor_version,
+            model_version=db_model.model_version,
+            provenance_chain=db_model.provenance_chain
+        )
 
     @staticmethod
     def load_benchmark_package(db: Session, case_id: str) -> Tuple[InvestigationModel, List[ProvenanceRecord]]:
-        """Loads pre-configured benchmark scenario from disk and ingests all artifacts."""
-        import os
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        filename = f"benchmark_{case_id}.json" if not case_id.endswith(".json") else f"benchmark_{case_id}"
-        file_path = os.path.join(base_dir, "data", filename)
-            
-        with open(file_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            
-        inv_id = data["investigation_id"]
+        """
+        Loads pre-configured benchmark scenario from disk via BenchmarkCollector,
+        validates frozen Phase 0 SHA-256 ground truth anchors, and ingests all artifacts.
+        """
+        collector = BenchmarkCollector()
+        benchmark_data = collector.collect({"case_id": case_id})
+
+        inv_id = benchmark_data["investigation_id"]
         inv = db.query(InvestigationModel).filter(InvestigationModel.id == inv_id).first()
         if not inv:
             inv = InvestigationModel(
                 id=inv_id,
-                title=data["title"],
-                target_persona_a=data["target_persona_a"],
-                target_persona_b=data["target_persona_b"],
+                title=benchmark_data["title"],
+                target_persona_a=benchmark_data["target_persona_a"],
+                target_persona_b=benchmark_data["target_persona_b"],
                 status="ACTIVE",
-                created_at=datetime.utcnow()
+                created_at=datetime.now(timezone.utc)
             )
             db.add(inv)
             db.commit()
             db.refresh(inv)
-            
+
         records = []
-        for art in data.get("artifacts", []):
+        for art in benchmark_data.get("artifacts", []):
             rec = IngestionService.process_and_store_artifact(db, inv_id, art)
             records.append(rec)
-            
+
         return inv, records

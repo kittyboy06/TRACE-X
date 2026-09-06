@@ -6,10 +6,11 @@ import zipfile
 import io
 import os
 
-from app.models.database import get_db, InvestigationModel, EvidenceRecordModel
+from app.models.database import get_db, InvestigationModel, EvidenceRecordModel, ExtractedEntityModel
 from app.models.schemas import EvidencePackageUpload, ProvenanceRecord, EvidenceType
 from app.services.ingestion_service import IngestionService
-from app.core.security import require_role, get_current_user
+from app.services.collectors.manual_upload_collector import ManualUploadCollector
+from app.core.security import require_role, get_current_user, authorize_investigation_access
 
 router = APIRouter()
 
@@ -64,10 +65,18 @@ def load_benchmark(
 
 
 @router.get("/{investigation_id}/artifacts")
-def get_investigation_artifacts(investigation_id: str, db: Session = Depends(get_db)):
+def get_investigation_artifacts(
+    investigation_id: str,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     """
     Retrieves all ingested evidence records for a given investigation.
+    Requires authentication and investigation-level authorization.
     """
+    from app.core.security import authorize_investigation_access
+    authorize_investigation_access(investigation_id, current_user, db)
+
     records = db.query(EvidenceRecordModel).filter(EvidenceRecordModel.investigation_id == investigation_id).all()
     return {
         "investigation_id": investigation_id,
@@ -137,48 +146,36 @@ async def upload_evidence_file(
 ):
     """
     Accepts multipart/form-data upload of .json or .zip evidence packages.
-    Enforces file size limits, safe archive extraction, and schema validation.
+    Enforces file size limits (10 MB), entry count (50 entries), uncompressed size (25 MB),
+    safe directory traversal prevention, and schema validation.
     """
     filename = file.filename or "evidence.json"
     contents = await file.read()
-    
+
     if len(contents) > MAX_UPLOAD_SIZE:
         raise HTTPException(
             status_code=413,
             detail=f"Uploaded file exceeds maximum limit of {MAX_UPLOAD_SIZE // (1024 * 1024)} MB."
         )
 
-    package_data = None
-    if filename.endswith(".json"):
-        try:
-            package_data = json.loads(contents.decode("utf-8"))
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Invalid JSON file format: {str(e)}")
-    elif filename.endswith(".zip"):
-        try:
-            with zipfile.ZipFile(io.BytesIO(contents)) as z:
-                entries = z.namelist()
-                if len(entries) > MAX_ZIP_ENTRIES:
-                    raise HTTPException(status_code=400, detail=f"ZIP archive contains too many files (max {MAX_ZIP_ENTRIES}).")
-                
-                total_uncompressed = sum(info.file_size for info in z.infolist())
-                if total_uncompressed > MAX_UNCOMPRESSED_SIZE:
-                    raise HTTPException(status_code=400, detail="ZIP archive exceeds uncompressed memory limit.")
-
-                json_files = [f for f in entries if f.endswith(".json") and ".." not in f and not f.startswith("/")]
-                if not json_files:
-                    raise HTTPException(status_code=400, detail="No safe .json evidence package found in ZIP archive.")
-                with z.open(json_files[0]) as jf:
-                    package_data = json.loads(jf.read().decode("utf-8"))
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Failed to extract ZIP archive: {str(e)}")
-    else:
+    ext = "json" if filename.endswith(".json") else ("zip" if filename.endswith(".zip") else "")
+    if not ext:
         raise HTTPException(
             status_code=400,
             detail="Unsupported file extension. Please upload a .json evidence package or .zip archive."
         )
+
+    try:
+        collector = ManualUploadCollector()
+        package_data = collector.collect({
+            "format": ext,
+            "content": contents,
+            "filename": filename
+        })
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to process evidence package: {str(e)}")
 
     if not package_data or not isinstance(package_data, dict):
         raise HTTPException(status_code=400, detail="Evidence package must be a valid JSON object.")
@@ -216,4 +213,34 @@ async def upload_evidence_file(
         "ingested_count": len(records),
         "uploaded_by": current_user.get("analyst_id", "ANALYST"),
         "records": records
+    }
+
+
+@router.get("/{investigation_id}/entities")
+def get_investigation_entities(
+    investigation_id: str,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Retrieves all discrete extracted entities (technical/cryptographic/network indicators)
+    associated with evidence in this investigation.
+    Requires authentication and investigation-level authorization.
+    """
+    authorize_investigation_access(investigation_id, current_user, db)
+
+    entities = db.query(ExtractedEntityModel).filter(ExtractedEntityModel.investigation_id == investigation_id).all()
+    return {
+        "investigation_id": investigation_id,
+        "count": len(entities),
+        "entities": [
+            {
+                "entity_id": e.entity_id,
+                "entity_type": e.entity_type,
+                "value": e.value,
+                "evidence_id": e.evidence_id,
+                "confidence": e.confidence
+            }
+            for e in entities
+        ]
     }

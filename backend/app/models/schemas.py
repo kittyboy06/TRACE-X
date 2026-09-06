@@ -21,11 +21,9 @@ class EvidenceStrength(str, Enum):
 
 
 class ConfidenceBand(str, Enum):
-    VERY_HIGH = "VERY_HIGH"
     HIGH = "HIGH"
-    MODERATE = "MODERATE"
+    MEDIUM = "MEDIUM"
     LOW = "LOW"
-    INCONCLUSIVE = "INCONCLUSIVE"
 
 
 class SignalStatus(str, Enum):
@@ -98,8 +96,9 @@ class DimensionSignal(BaseModel):
     adjusted_score: float = Field(..., ge=0.0, le=1.0, description="raw_score * reliability_factor")
     configured_weight: float = Field(..., ge=0.0, le=1.0, description="Weight proportion in fusion")
     contribution: float = Field(..., description="configured_weight * adjusted_score")
-    evidence_ids: List[str] = []
-    supporting_details: Dict[str, Any] = {}
+    evidence_ids: List[str] = Field(default_factory=list)
+    supporting_details: Dict[str, Any] = Field(default_factory=dict)
+    findings: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class ChannelDampening(BaseModel):
@@ -130,8 +129,16 @@ class AssessmentRationale(BaseModel):
     summary: str
     supporting_signal_count: int
     contradiction_count: int
-    hard_cap_applied: bool
-    hard_cap_reason: Optional[str] = None
+    hard_gate_applied: bool
+    hard_gate_reason: Optional[str] = None
+
+    @property
+    def hard_cap_applied(self) -> bool:
+        return self.hard_gate_applied
+
+    @property
+    def hard_cap_reason(self) -> Optional[str]:
+        return self.hard_gate_reason
 
 
 class AttributionAssessment(BaseModel):
@@ -145,13 +152,19 @@ class AttributionAssessment(BaseModel):
     confidence_range_max: float = Field(..., ge=0.0, le=1.0)
     base_score: float = Field(..., description="Weighted sum before global penalties")
     global_penalty_multiplier: float = Field(default=1.0, description="Product of (1 - p_j) for soft contradictions")
-    evidence_score: float = Field(..., description="Final fused numerical score")
     real_world_identity: str = Field(default="NOT ESTABLISHED")
     evidence_dimensions: EvidenceDimensionsBlock
-    channel_dampenings: List[ChannelDampening] = []
-    global_contradictions: List[GlobalContradiction] = []
+    channel_dampenings: List[ChannelDampening] = Field(default_factory=list)
+    global_contradictions: List[GlobalContradiction] = Field(default_factory=list)
+    hard_gate_applied: bool = False
+    hard_gate_reason: Optional[str] = None
     assessment_rationale: AssessmentRationale
     created_at: datetime
+
+    @property
+    def evidence_score(self) -> float:
+        """Deprecated alias for base_score preserved for backward compatibility."""
+        return self.base_score
 
 
 class SensitivityAdjustmentRequest(BaseModel):
@@ -169,7 +182,6 @@ class AuditDecisionRequest(BaseModel):
     investigation_id: str
     assessment_id: str
     action: AnalystDecision
-    analyst_id: str
     rationale: str
 
 
@@ -183,7 +195,7 @@ class AuditEvent(BaseModel):
     rationale: str
     prior_state: str = Field(..., description="Prior algorithmic attribution state (e.g. LIKELY_LINK)")
     resulting_state: str = Field(..., description="Resulting operational state (e.g. CONFIRMED, REJECTED)")
-    previous_hash: str = Field(default="GENESIS_ROOT_HASH_0000000000000000", description="Cryptographic hash of the preceding audit event")
+    previous_hash: str = Field(default="0" * 64, description="Cryptographic hash of the preceding audit event")
     event_hash: str = Field(..., description="Cryptographic SHA-256 fingerprint of the audit record")
 
 

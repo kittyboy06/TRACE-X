@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, List
 from jose import jwt, JWTError
 import bcrypt
@@ -40,10 +40,7 @@ DEMO_USERS: Dict[str, Dict[str, Any]] = {
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    try:
-        return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
-    except Exception:
-        return False
+    return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
 
 
 def get_password_hash(password: str) -> str:
@@ -57,9 +54,9 @@ def create_access_token(
     expires_delta: Optional[timedelta] = None
 ) -> str:
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode = {
         "exp": expire,
         "sub": str(subject),
@@ -103,3 +100,43 @@ def require_role(*allowed_roles: str):
             )
         return current_user
     return role_checker
+
+
+def authorize_investigation_access(
+    investigation_id: str,
+    current_user: Dict[str, Any],
+    db: Any
+) -> Any:
+    """
+    Enforces investigation-scoped authorization:
+    - 404 if investigation does not exist.
+    - LEAD_AUDITOR is authorized for all investigations.
+    - CTI_ANALYST is authorized if assigned_analyst_id matches their analyst_id (or if unassigned/default).
+    - 403 Forbidden if analyst is not assigned to the investigation.
+    """
+    from app.models.database import InvestigationModel
+    inv = db.query(InvestigationModel).filter(InvestigationModel.id == investigation_id).first()
+    if not inv:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Investigation '{investigation_id}' not found."
+        )
+
+    user_role = current_user.get("role", "CTI_ANALYST")
+    analyst_id = current_user.get("analyst_id")
+
+    if user_role == "LEAD_AUDITOR":
+        return inv
+
+    if user_role == "CTI_ANALYST":
+        if inv.assigned_analyst_id and inv.assigned_analyst_id != analyst_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Access forbidden: Analyst '{analyst_id}' is not authorized for investigation '{investigation_id}'."
+            )
+        return inv
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Access forbidden: Insufficient investigation permissions."
+    )

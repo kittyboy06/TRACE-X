@@ -1,192 +1,86 @@
-import numpy as np
-import os
-import logging
 from typing import List, Dict, Any, Optional, Tuple
 from app.models.schemas import DimensionSignal, SignalStatus, StylometryEngineType
-from app.core.config import settings
-
-logger = logging.getLogger(__name__)
-
-# Global model cache to avoid re-loading on each request
-_TRANSFORMER_MODEL = None
-_MODEL_LOAD_FAILED = False
+from app.services.engines.stylometric_engine import StylometricEngine
 
 
 class StylometryEngine:
-    MIN_WORD_COUNT = 150
-    MIN_TOKEN_COUNT = 500
-    DEFAULT_MODEL_NAME = settings.STYLOMETRY_MODEL
+    """
+    Compatibility facade re-exporting canonical StylometricEngine.
+    """
+    MIN_WORD_COUNT = StylometricEngine.MIN_WORD_COUNT
+    MIN_TOKEN_COUNT = StylometricEngine.MIN_TOKEN_COUNT
+    DEFAULT_MODEL_NAME = StylometricEngine.PREFERRED_MODEL_NAME
 
     @classmethod
-    def _get_transformer_model(cls):
-        global _TRANSFORMER_MODEL, _MODEL_LOAD_FAILED
-        if _TRANSFORMER_MODEL is not None:
-            return _TRANSFORMER_MODEL
-        if _MODEL_LOAD_FAILED:
-            return None
-
-        if not settings.ENABLE_REAL_TRANSFORMER:
-            _MODEL_LOAD_FAILED = True
-            return None
-
-        try:
-            from sentence_transformers import SentenceTransformer
-            # Try loading cached local weights first
-            try:
-                _TRANSFORMER_MODEL = SentenceTransformer(cls.DEFAULT_MODEL_NAME, local_files_only=True)
-            except Exception:
-                _TRANSFORMER_MODEL = SentenceTransformer(cls.DEFAULT_MODEL_NAME)
-            logger.info(f"Loaded SentenceTransformer: {cls.DEFAULT_MODEL_NAME}")
-            return _TRANSFORMER_MODEL
-        except Exception as e:
-            logger.info(f"SentenceTransformer not cached locally ({str(e)}). Using deterministic statistical feature engine.")
-            _MODEL_LOAD_FAILED = True
-            return None
-
-    @staticmethod
-    def _compute_cosine_similarity(vec_a: np.ndarray, vec_b: np.ndarray) -> float:
-        norm_a = np.linalg.norm(vec_a)
-        norm_b = np.linalg.norm(vec_b)
-        if norm_a == 0 or norm_b == 0:
-            return 0.0
-        return float(np.dot(vec_a, vec_b) / (norm_a * norm_b))
-
-    @classmethod
-    def _extract_pseudo_embedding(cls, text: str) -> np.ndarray:
-        """
-        Deterministic, offline statistical feature vectorizer (64 dimensions)
-        capturing syntax, punctuation density, casing, and word-length distributions.
-        Used as a truthful fallback when transformer weights are unavailable offline.
-        """
-        words = text.lower().split()
-        if not words:
-            return np.zeros(64)
-            
-        vector = np.zeros(64)
-        for i, word in enumerate(words):
-            idx = (hash(word) % 60) + 4
-            vector[idx] += 1.0
-            
-        # Punctuation & syntactic signals
-        vector[0] = text.count(".") / max(1, len(words))
-        vector[1] = text.count(",") / max(1, len(words))
-        vector[2] = sum(1 for c in text if c.isupper()) / max(1, len(text))
-        vector[3] = len(words) / 100.0
-        
-        norm = np.linalg.norm(vector)
-        return vector / norm if norm > 0 else vector
-
-    @classmethod
-    def extract_embedding_and_similarity(cls, text_a: str, text_b: str) -> Tuple[float, str, Optional[str], int]:
-        """
-        Extracts author embedding using SentenceTransformer (if available)
-        or deterministic statistical fallback. Returns (similarity, engine_name, model_name, embedding_dim).
-        """
-        model = cls._get_transformer_model()
-        if model is not None:
-            try:
-                embeddings = model.encode([text_a, text_b], convert_to_numpy=True)
-                sim = cls._compute_cosine_similarity(embeddings[0], embeddings[1])
-                return round(sim, 4), StylometryEngineType.TRANSFORMER.value, cls.DEFAULT_MODEL_NAME, int(embeddings.shape[1])
-            except Exception as e:
-                logger.warning(f"Transformer inference error ({str(e)}). Using fallback.")
-
-        # Deterministic Statistical Feature Engine Fallback
-        vec_a = cls._extract_pseudo_embedding(text_a)
-        vec_b = cls._extract_pseudo_embedding(text_b)
-        sim = cls._compute_cosine_similarity(vec_a, vec_b)
-        return round(sim, 4), StylometryEngineType.DETERMINISTIC_FALLBACK.value, None, 64
+    def extract_embedding_and_similarity(
+        cls,
+        text_a: str,
+        text_b: str
+    ) -> Tuple[float, str, Optional[str], int]:
+        sim, eng, model, dim = StylometricEngine.extract_embedding_and_similarity(text_a, text_b)
+        eng_type = StylometryEngineType.TRANSFORMER.value if eng == "TRANSFORMER" else StylometryEngineType.DETERMINISTIC_FALLBACK.value
+        return sim, eng_type, model, dim
 
     @classmethod
     def analyze_personas(
         cls,
         persona_a_posts: List[Dict[str, Any]],
         persona_b_posts: List[Dict[str, Any]],
-        weight: float = 0.20
+        weight: float = 0.20,
+        reliability_context: float = 1.0
     ) -> DimensionSignal:
-        """
-        Extracts stylometric signals, evaluates minimum-word guardrails,
-        computes cosine similarity, and sets Level 1 channel reliability.
-        """
-        def get_text(p: Dict[str, Any]) -> str:
-            return p.get("post_text") or p.get("raw_payload", {}).get("post_text", "")
+        contract_sig = StylometricEngine.analyze(
+            artifacts=persona_a_posts + persona_b_posts,
+            reliability_context=reliability_context,
+            persona_a_posts=persona_a_posts,
+            persona_b_posts=persona_b_posts
+        )
 
-        def get_lang(p: Dict[str, Any]) -> str:
-            return p.get("language") or p.get("raw_payload", {}).get("language", "en")
+        status_val = SignalStatus(contract_sig.status.value)
+        meta = contract_sig.engine_metadata
 
-        text_a = " ".join([get_text(p) for p in persona_a_posts])
-        text_b = " ".join([get_text(p) for p in persona_b_posts])
-        
-        words_a = len(text_a.split())
-        words_b = len(text_b.split())
-        tokens_a = max(len(text_a) // 4, words_a)
-        tokens_b = max(len(text_b) // 4, words_b)
-        
-        # 1. Dual Guardrail check (Minimum 150 words OR 500 tokens)
-        sufficient_a = (words_a >= cls.MIN_WORD_COUNT) or (tokens_a >= cls.MIN_TOKEN_COUNT)
-        sufficient_b = (words_b >= cls.MIN_WORD_COUNT) or (tokens_b >= cls.MIN_TOKEN_COUNT)
-
-        if not (sufficient_a and sufficient_b):
+        if contract_sig.status == SignalStatus.NOT_ENOUGH_EVIDENCE:
             return DimensionSignal(
                 dimension_name="stylometric",
-                status=SignalStatus.NOT_ENOUGH_EVIDENCE,
+                status=status_val,
                 raw_score=0.0,
                 reliability_factor=0.0,
                 adjusted_score=0.0,
                 configured_weight=weight,
                 contribution=0.0,
-                evidence_ids=[p.get("evidence_id", "") for p in persona_a_posts + persona_b_posts if "evidence_id" in p],
+                evidence_ids=contract_sig.evidence_ids,
                 supporting_details={
                     "status": "NOT_ENOUGH_EVIDENCE",
-                    "reason": (
-                        f"Insufficient corpus for statistical stylometry "
-                        f"(Persona A: {words_a} words / {tokens_a} tokens, Persona B: {words_b} words / {tokens_b} tokens; "
-                        f"required: >= {cls.MIN_WORD_COUNT} words OR >= {cls.MIN_TOKEN_COUNT} tokens)"
-                    ),
-                    "words_persona_a": words_a,
-                    "words_persona_b": words_b,
-                    "tokens_persona_a": tokens_a,
-                    "tokens_persona_b": tokens_b,
-                    "engine": StylometryEngineType.DETERMINISTIC_FALLBACK.value,
-                    "model": None
+                    "reason": meta.get("reason", "Corpus volume below mandatory 150-word and 500-token threshold."),
+                    "sample_metrics": meta.get("sample_metrics", {}),
+                    "action_required": "Provide additional communication samples to satisfy the evidentiary threshold."
                 }
             )
 
-        # 2. Compute similarity with explicit engine and model metadata
-        raw_sim, engine_name, model_name, emb_dim = cls.extract_embedding_and_similarity(text_a, text_b)
-        
-        # 3. Channel reliability (e.g. check language consistency)
-        lang_a = get_lang(persona_a_posts[0]) if persona_a_posts else "en"
-        lang_b = get_lang(persona_b_posts[0]) if persona_b_posts else "en"
-        
-        reliability = 1.0
-        details = {
-            "cosine_similarity": raw_sim,
-            "engine": engine_name,
-            "model": model_name,
-            "embedding_dimension": emb_dim,
-            "words_persona_a": words_a,
-            "words_persona_b": words_b,
-            "language_persona_a": lang_a,
-            "language_persona_b": lang_b,
-            "token_count": words_a + words_b
-        }
-
-        if lang_a != lang_b:
-            reliability = 0.50
-            details["cross_language_penalty"] = "-50% (Cross-language syntax / translation variation)"
-
-        adjusted_score = round(raw_sim * reliability, 4)
-        contribution = round(weight * adjusted_score, 4)
+        translation_detected = meta.get("translation_dampening_applied", False)
+        eng_name = meta.get("engine", "DETERMINISTIC_FALLBACK")
+        eng_type = StylometryEngineType.TRANSFORMER.value if eng_name == "TRANSFORMER" else StylometryEngineType.DETERMINISTIC_FALLBACK.value
 
         return DimensionSignal(
             dimension_name="stylometric",
-            status=SignalStatus.VALID,
-            raw_score=raw_sim,
-            reliability_factor=reliability,
-            adjusted_score=adjusted_score,
+            status=status_val,
+            raw_score=contract_sig.raw_score,
+            reliability_factor=contract_sig.reliability_factor,
+            adjusted_score=contract_sig.adjusted_score,
             configured_weight=weight,
-            contribution=contribution,
-            evidence_ids=[p.get("evidence_id", "") for p in persona_a_posts + persona_b_posts if "evidence_id" in p],
-            supporting_details=details
+            contribution=round(weight * contract_sig.adjusted_score, 4),
+            evidence_ids=contract_sig.evidence_ids,
+            supporting_details={
+                "similarity_score": contract_sig.raw_score,
+                "engine_type": eng_type,
+                "model_name": meta.get("model_name"),
+                "embedding_dimension": meta.get("embedding_dimension"),
+                "persona_a_words": meta.get("words_persona_a"),
+                "persona_a_tokens": meta.get("tokens_persona_a"),
+                "persona_b_words": meta.get("words_persona_b"),
+                "persona_b_tokens": meta.get("tokens_persona_b"),
+                "translation_variation_detected": translation_detected,
+                "reliability_modifier": contract_sig.reliability_factor,
+                "interpretation": f"High lexical alignment ({contract_sig.raw_score}) across syntactic style vectors" if contract_sig.raw_score >= 0.75 else "Moderate to low stylometric similarity"
+            }
         )

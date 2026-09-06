@@ -13,3 +13,5 @@ numpy>=1.26.0
 scikit-learn>=1.4.0
 sentence-transformers>=2.5.0
 neo4j>=5.18.0
+reportlab>=4.0.0
+pypdf>=4.0.0

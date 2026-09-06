@@ -1,13 +1,25 @@
 import React from 'react';
 import { AttributionAssessment, AttributionState } from '../../types';
-import { ShieldCheck, AlertCircle, HelpCircle, CheckCircle2, XCircle } from 'lucide-react';
+import { ShieldCheck, AlertCircle, HelpCircle, CheckCircle2, XCircle, Info } from 'lucide-react';
+import { WhyNotLinkedCard } from './WhyNotLinkedCard';
+import { CoinJoinBanner } from './CoinJoinBanner';
 
 interface AttributionCardProps {
   assessment: AttributionAssessment;
 }
 
 export const AttributionCard: React.FC<AttributionCardProps> = ({ assessment }) => {
-  const { attribution_state, confidence_band, evidence_score, base_score, assessment_rationale } = assessment;
+  const {
+    attribution_state,
+    confidence_band,
+    base_score,
+    assessment_rationale,
+    real_world_identity,
+    channel_dampenings,
+    evidence_dimensions
+  } = assessment;
+
+  const financialDampening = channel_dampenings.find(d => d.dimension === 'financial');
 
   const getStateBadgeConfig = (state: AttributionState) => {
     switch (state) {
@@ -65,8 +77,9 @@ export const AttributionCard: React.FC<AttributionCardProps> = ({ assessment }) 
   const badge = getStateBadgeConfig(attribution_state);
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-lg p-3.5 shadow-sm">
-      <div className="flex items-center justify-between mb-2.5">
+    <div className="bg-slate-900 border border-slate-800 rounded-lg p-3.5 shadow-sm space-y-3">
+      {/* Top Meta Bar */}
+      <div className="flex items-center justify-between">
         <span className="text-[11px] font-mono tracking-wider text-slate-400 uppercase font-semibold">
           ATTRIBUTION ASSESSMENT
         </span>
@@ -76,7 +89,7 @@ export const AttributionCard: React.FC<AttributionCardProps> = ({ assessment }) 
       </div>
 
       {/* State & Score Hero */}
-      <div className="flex items-center justify-between bg-slate-950 p-2.5 rounded-md border border-slate-800/80 mb-3">
+      <div className="flex items-center justify-between bg-slate-950 p-2.5 rounded-md border border-slate-800/80">
         <div className="flex items-center space-x-2.5">
           <div className={`px-2.5 py-1 rounded-md border flex items-center space-x-1.5 ${badge.bg} ${badge.border}`}>
             {badge.icon}
@@ -91,12 +104,29 @@ export const AttributionCard: React.FC<AttributionCardProps> = ({ assessment }) 
         </div>
 
         <div className="text-right pl-3 border-l border-slate-800">
-          <div className="text-[10px] font-mono text-slate-400">Fused Score</div>
+          <div className="text-[10px] font-mono text-slate-400">Authoritative S_base</div>
           <div className="text-lg font-bold font-mono text-cyan-400">
-            {evidence_score.toFixed(2)}
+            {base_score.toFixed(4)}
           </div>
         </div>
       </div>
+
+      {/* Permanent Identity Disclaimer */}
+      <div className="bg-slate-950/70 border border-slate-800/80 rounded px-2.5 py-1.5 flex items-center justify-between text-[10px] font-mono">
+        <span className="text-slate-400">Scope Restriction:</span>
+        <span className="text-amber-400 font-semibold tracking-wide">
+          {real_world_identity || 'REAL-WORLD IDENTITY: NOT ESTABLISHED'}
+        </span>
+      </div>
+
+      {/* Level 2 "Why Not Linked?" Card (Generic to any Level 2 hard gate) */}
+      <WhyNotLinkedCard assessment={assessment} />
+
+      {/* Level 1 CoinJoin Dampening Banner */}
+      <CoinJoinBanner
+        dampening={financialDampening}
+        financialSignal={evidence_dimensions.financial}
+      />
 
       {/* Rationale & Explainability Box */}
       <div className="bg-slate-950/60 border border-slate-800/60 rounded p-2.5 text-xs text-slate-300 leading-relaxed font-sans">

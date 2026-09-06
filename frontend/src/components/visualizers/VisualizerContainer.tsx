@@ -4,26 +4,31 @@ import { GraphCanvas } from './GraphCanvas';
 import { FinancialFlow } from './FinancialFlow';
 import { TemporalMatrix } from './TemporalMatrix';
 import { EvidenceMap } from './EvidenceMap';
-import { Share2, DollarSign, Clock, Network } from 'lucide-react';
+import { SourcesPanel } from './SourcesPanel';
+import { Share2, DollarSign, Clock, Network, ShieldCheck } from 'lucide-react';
 
 interface VisualizerContainerProps {
   graphData: CytoscapeGraphData;
   assessment: AttributionAssessment;
+  investigationId: string;
   onSelectNode?: (nodeId: string) => void;
+  selectedNodeId?: string;
 }
 
 export const VisualizerContainer: React.FC<VisualizerContainerProps> = ({
   graphData,
   assessment,
-  onSelectNode
+  investigationId,
+  onSelectNode,
+  selectedNodeId
 }) => {
-  const [activeTab, setActiveTab] = useState<'graph' | 'financial' | 'temporal' | 'evidence'>('graph');
+  const [activeTab, setActiveTab] = useState<'graph' | 'financial' | 'temporal' | 'evidence' | 'sources'>('graph');
 
   return (
     <div className="w-full h-full flex flex-col bg-slate-900 border border-slate-800 rounded-lg overflow-hidden shadow-sm">
       {/* Visualizer Tab Bar */}
       <div className="bg-slate-950 border-b border-slate-800 px-3 py-1.5 flex items-center justify-between">
-        <div className="flex items-center space-x-1 font-mono text-xs">
+        <div className="flex flex-wrap items-center gap-1 font-mono text-xs">
           <button
             onClick={() => setActiveTab('graph')}
             className={`flex items-center space-x-1.5 px-3 py-1 rounded-md transition ${
@@ -71,6 +76,18 @@ export const VisualizerContainer: React.FC<VisualizerContainerProps> = ({
             <Network className="w-3.5 h-3.5" />
             <span>Evidence Map</span>
           </button>
+
+          <button
+            onClick={() => setActiveTab('sources')}
+            className={`flex items-center space-x-1.5 px-3 py-1 rounded-md transition ${
+              activeTab === 'sources'
+                ? 'bg-teal-500/20 text-teal-300 border border-teal-500/40 font-semibold'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+            }`}
+          >
+            <ShieldCheck className="w-3.5 h-3.5" />
+            <span>Sources & Trust Tiers</span>
+          </button>
         </div>
 
         <div className="text-[11px] font-mono text-slate-500 hidden sm:block">
@@ -81,7 +98,7 @@ export const VisualizerContainer: React.FC<VisualizerContainerProps> = ({
       {/* Main Tab Body */}
       <div className="flex-1 p-2 bg-slate-950 overflow-hidden relative">
         {activeTab === 'graph' && (
-          <GraphCanvas data={graphData} onSelectNode={onSelectNode} />
+          <GraphCanvas data={graphData} onSelectNode={onSelectNode} selectedNodeId={selectedNodeId} />
         )}
         {activeTab === 'financial' && (
           <FinancialFlow financialSignal={assessment.evidence_dimensions.financial} />
@@ -94,6 +111,9 @@ export const VisualizerContainer: React.FC<VisualizerContainerProps> = ({
         )}
         {activeTab === 'evidence' && (
           <EvidenceMap dimensions={assessment.evidence_dimensions} />
+        )}
+        {activeTab === 'sources' && (
+          <SourcesPanel investigationId={investigationId} />
         )}
       </div>
     </div>

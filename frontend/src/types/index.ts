@@ -5,11 +5,11 @@ export type AttributionState =
   | 'INCONCLUSIVE'
   | 'LIKELY_DIFFERENT';
 
-export type ConfidenceBand = 'VERY_HIGH' | 'HIGH' | 'MODERATE' | 'LOW' | 'INCONCLUSIVE';
+export type ConfidenceBand = 'HIGH' | 'MEDIUM' | 'LOW';
 
 export type SignalStatus = 'VALID' | 'NOT_ENOUGH_EVIDENCE' | 'UNAVAILABLE' | 'ERROR';
 
-export type AnalystAction = 'PENDING' | 'CONFIRMED' | 'REJECTED' | 'INVESTIGATE';
+export type AnalystAction = 'PENDING' | 'CONFIRMED' | 'REJECTED' | 'INVESTIGATE' | 'WEIGHTS_COMMITTED';
 
 export interface DimensionSignal {
   dimension_name: 'cryptographic' | 'financial' | 'stylometric' | 'infrastructure' | 'behavioral_temporal';
@@ -21,6 +21,7 @@ export interface DimensionSignal {
   contribution: number;
   evidence_ids: string[];
   supporting_details: Record<string, any>;
+  findings?: Array<Record<string, any>>;
 }
 
 export interface ChannelDampening {
@@ -49,8 +50,8 @@ export interface AssessmentRationale {
   summary: string;
   supporting_signal_count: number;
   contradiction_count: number;
-  hard_cap_applied: boolean;
-  hard_cap_reason?: string | null;
+  hard_gate_applied: boolean;
+  hard_gate_reason?: string | null;
 }
 
 export interface AttributionAssessment {
@@ -60,12 +61,14 @@ export interface AttributionAssessment {
   target_persona_b: string;
   attribution_state: AttributionState;
   confidence_band: ConfidenceBand;
-  confidence_range_min: number;
-  confidence_range_max: number;
+  confidence_range_min?: number;
+  confidence_range_max?: number;
   base_score: number;
-  global_penalty_multiplier: number;
-  evidence_score: number;
+  global_penalty_multiplier?: number;
+  evidence_score?: number;
   real_world_identity: string;
+  hard_gate_applied: boolean;
+  hard_gate_reason?: string | null;
   evidence_dimensions: EvidenceDimensionsBlock;
   channel_dampenings: ChannelDampening[];
   global_contradictions: GlobalContradiction[];
@@ -81,9 +84,36 @@ export interface ProvenanceRecord {
   content_hash: string;
   artifact_type: string;
   raw_payload: Record<string, any>;
-  extractor_version: string;
+  extractor_version?: string;
   model_version?: string;
-  provenance_chain: string[];
+  provenance_chain?: string[];
+}
+
+export interface SourceFactors {
+  reputation: number;
+  freshness: number;
+  corroboration: number;
+  consistency: number;
+}
+
+export interface SourceReliabilityRecord {
+  id: number;
+  source_uri: string;
+  trust_tier: string;
+  reliability_score: number;
+  reliability_class: 'HIGH' | 'MEDIUM' | 'LOW';
+  factors: SourceFactors;
+  last_scan: string;
+  scan_status: string;
+  diagnostic_status: string;
+}
+
+export interface ExtractedEntityRecord {
+  entity_id: string;
+  entity_type: string;
+  value: string;
+  evidence_id: string;
+  confidence: number;
 }
 
 export interface CytoscapeElement {

@@ -16,9 +16,10 @@ import {
 interface GraphCanvasProps {
   data: CytoscapeGraphData;
   onSelectNode?: (nodeId: string) => void;
+  selectedNodeId?: string;
 }
 
-export const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onSelectNode }) => {
+export const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onSelectNode, selectedNodeId }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<cytoscape.Core | null>(null);
 
@@ -247,6 +248,21 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onSelectNode }) 
       cy.destroy();
     };
   }, [data, filterCrypto, filterFinancial, filterPosts, filterInfra]);
+
+  useEffect(() => {
+    if (!cyRef.current || !selectedNodeId) return;
+    const cy = cyRef.current;
+    cy.nodes().unselect();
+    const target = cy.getElementById(selectedNodeId);
+    if (target.nonempty()) {
+      target.select();
+      cy.animate({
+        center: { eles: target },
+        zoom: Math.max(cy.zoom(), 1.2),
+        duration: 350
+      });
+    }
+  }, [selectedNodeId]);
 
   const handleFit = () => {
     if (cyRef.current) cyRef.current.fit(undefined, 30);

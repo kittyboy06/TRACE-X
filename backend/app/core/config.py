@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     NEO4J_PASSWORD: str = os.getenv("NEO4J_PASSWORD", "DEV_NEO4J_PASSWORD_SIH26151")
     
     # Analytical Model configuration (Dense transformer enabled by default)
-    STYLOMETRY_MODEL: str = os.getenv("STYLOMETRY_MODEL", "all-MiniLM-L6-v2")
+    STYLOMETRY_MODEL: str = os.getenv("STYLOMETRY_MODEL", "sentence-transformers/all-mpnet-base-v2")
     ENABLE_REAL_TRANSFORMER: bool = os.getenv("ENABLE_REAL_TRANSFORMER", "true").lower() in ("true", "1", "yes")
     
     # CORS (specific allowed origins for credentials security)

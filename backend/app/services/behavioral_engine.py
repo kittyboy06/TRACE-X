@@ -1,79 +1,55 @@
-from datetime import datetime
 from typing import List, Dict, Any, Tuple, Optional
 from app.models.schemas import DimensionSignal, GlobalContradiction, SignalStatus
+from app.services.engines.temporal_engine import TemporalEngine
 
 
 class BehavioralEngine:
+    """
+    Compatibility facade re-exporting canonical TemporalEngine.
+    """
     @classmethod
     def analyze_behavior_and_temporality(
         cls,
         temporal_artifacts: List[Dict[str, Any]],
         post_artifacts: List[Dict[str, Any]],
-        weight: float = 0.10
+        weight: float = 0.10,
+        reliability_context: float = 1.0
     ) -> Tuple[DimensionSignal, List[GlobalContradiction]]:
-        """
-        Analyzes post timing, migration sequences, and checks for hard temporal concurrency clashes.
-        Returns the Behavioral DimensionSignal and any global contradictions triggered.
-        """
+        contract_sig = TemporalEngine.analyze(
+            artifacts=temporal_artifacts + post_artifacts,
+            reliability_context=reliability_context
+        )
+
         global_contradictions: List[GlobalContradiction] = []
-        
-        # 1. Check for explicit temporal burst / concurrency clash artifact
-        hard_concurrency_found = False
-        concurrency_detail = ""
-        
-        for art in temporal_artifacts:
-            payload = art.get("raw_payload", {})
-            if payload.get("concurrent_authenticated_session") or payload.get("conflict_severity") == "CRITICAL":
-                hard_concurrency_found = True
-                concurrency_detail = (
-                    f"Simultaneous authenticated activity confirmed within {payload.get('time_delta_seconds', 0)}s "
-                    f"across conflicting nodes ({payload.get('persona_a_active_window', {}).get('node_location', 'Node A')} vs "
-                    f"{payload.get('persona_b_active_window', {}).get('node_location', 'Node B')})."
-                )
-                
+        for finding in contract_sig.findings:
+            if finding.get("finding") == "TEMPORAL_CONCURRENCY_CLASH":
                 global_contradictions.append(
                     GlobalContradiction(
                         contradiction_type="TEMPORAL_CONCURRENCY_CLASH",
                         severity="CRITICAL",
-                        penalty=0.0,  # Hard gate overrides score directly
+                        penalty=0.0,  # Level 2 hard gate overrides score directly
                         triggers_hard_gate=True,
-                        detail=concurrency_detail
+                        detail=finding.get("observation", "Concurrent authenticated sessions detected across conflicting nodes.")
                     )
                 )
 
-        # 2. Migration & Behavioral Score Evaluation
-        if hard_concurrency_found:
-            raw_score = 0.10
-            status = SignalStatus.VALID
-            details = {
-                "sequence_type": "CONCURRENT_OPERATIONAL_CLASH",
-                "hard_gate_triggered": True,
-                "contradiction_summary": concurrency_detail
-            }
-        elif post_artifacts:
-            raw_score = 0.80  # Demonstrates clean sequential migration pattern
-            status = SignalStatus.VALID
-            details = {
-                "sequence_type": "CLEAN_SEQUENTIAL_MIGRATION",
-                "dormancy_observed": True,
-                "overlap_windows_detected": False,
-                "summary": "Persona A went dormant prior to Persona B emergence with consistent operational cadence."
-            }
-        else:
-            raw_score = 0.0
-            status = SignalStatus.NOT_ENOUGH_EVIDENCE
-            details = {"message": "No behavioral or temporal records found."}
-            
+        status_val = SignalStatus(contract_sig.status.value)
+        meta = contract_sig.engine_metadata
+
         signal = DimensionSignal(
             dimension_name="behavioral_temporal",
-            status=status,
-            raw_score=raw_score,
-            reliability_factor=1.0,
-            adjusted_score=raw_score,
+            status=status_val,
+            raw_score=contract_sig.raw_score,
+            reliability_factor=contract_sig.reliability_factor,
+            adjusted_score=contract_sig.adjusted_score,
             configured_weight=weight,
-            contribution=round(weight * raw_score, 4),
-            evidence_ids=[a.get("evidence_id", "") for a in temporal_artifacts + post_artifacts if "evidence_id" in a],
-            supporting_details=details
+            contribution=round(weight * contract_sig.adjusted_score, 4),
+            evidence_ids=contract_sig.evidence_ids,
+            supporting_details={
+                "apparent_activity_profile": meta.get("apparent_activity_profile", "DIURNAL_UTC_PROFILE"),
+                "concurrency_clash_observed": meta.get("concurrency_clash_observed", False),
+                "findings": contract_sig.findings
+            }
         )
-        
+
         return signal, global_contradictions

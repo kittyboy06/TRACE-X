@@ -102,12 +102,12 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* Actions & 1-Click Benchmark Picker */}
-      <div className="flex items-center space-x-2.5">
-        <div className="flex items-center bg-slate-950 p-0.5 rounded-lg border border-slate-800">
+      <div className="flex items-center space-x-2.5 shrink-0">
+        <div className="flex items-center bg-slate-950 p-0.5 rounded-lg border border-slate-800 shrink-0">
           <button
             onClick={() => onSelectCase('1')}
             disabled={isProcessing}
-            className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+            className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-all whitespace-nowrap ${
               activeCase === '1'
                 ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
                 : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
@@ -118,7 +118,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             onClick={() => onSelectCase('2')}
             disabled={isProcessing}
-            className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+            className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-all whitespace-nowrap ${
               activeCase === '2'
                 ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-sm'
                 : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
@@ -130,29 +130,29 @@ export const Header: React.FC<HeaderProps> = ({
 
         <button
           onClick={onOpenUpload}
-          className="flex items-center space-x-1.5 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-md text-xs border border-slate-700 transition"
+          className="flex items-center space-x-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-md text-xs border border-slate-700 transition whitespace-nowrap shrink-0"
           title="Upload Custom Evidence Package"
         >
-          <UploadCloud className="w-3.5 h-3.5 text-slate-300" />
+          <UploadCloud className="w-3.5 h-3.5 text-slate-300 shrink-0" />
           <span>Upload</span>
         </button>
 
         {/* Multi-Format Dossier Export Split Button */}
-        <div className="relative inline-flex items-center rounded-md shadow-sm" ref={menuRef}>
+        <div className="relative inline-flex items-stretch rounded-md shadow-sm shrink-0" ref={menuRef}>
           <button
             onClick={triggerExportPdf}
-            className="flex items-center space-x-1.5 px-3 py-1 bg-cyan-600 hover:bg-cyan-500 text-white rounded-l-md text-xs font-medium transition border-r border-cyan-700/60 shadow-sm"
+            className="flex items-center space-x-1.5 px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-l-md text-xs font-medium transition border-r border-cyan-700/60 shadow-sm whitespace-nowrap"
             title="Export Publication-Grade PDF Dossier"
           >
-            <FileText className="w-3.5 h-3.5" />
-            <span>Export Dossier</span>
+            <FileText className="w-3.5 h-3.5 shrink-0" />
+            <span className="whitespace-nowrap">Export Dossier</span>
           </button>
           <button
             onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
-            className="px-1.5 py-1 bg-cyan-600 hover:bg-cyan-500 text-white rounded-r-md text-xs font-medium transition shadow-sm"
+            className="flex items-center justify-center px-2 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-r-md text-xs font-medium transition shadow-sm shrink-0"
             title="Select Dossier Export Format (PDF, CSV, JSON)"
           >
-            <ChevronDown className="w-3.5 h-3.5" />
+            <ChevronDown className="w-3.5 h-3.5 shrink-0" />
           </button>
 
           {isExportMenuOpen && (

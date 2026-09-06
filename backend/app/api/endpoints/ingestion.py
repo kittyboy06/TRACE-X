@@ -5,6 +5,7 @@ import json
 import zipfile
 import io
 import os
+import zlib
 
 from app.models.database import get_db, InvestigationModel, EvidenceRecordModel, ExtractedEntityModel
 from app.models.schemas import EvidencePackageUpload, ProvenanceRecord, EvidenceType
@@ -180,7 +181,7 @@ async def upload_evidence_file(
     if not package_data or not isinstance(package_data, dict):
         raise HTTPException(status_code=400, detail="Evidence package must be a valid JSON object.")
 
-    investigation_id = package_data.get("investigation_id", f"INV-UPLOAD-{abs(hash(filename)) % 100000:05d}")
+    investigation_id = package_data.get("investigation_id", f"INV-UPLOAD-{(zlib.crc32(filename.encode('utf-8')) % 100000):05d}")
     persona_a = package_data.get("target_persona_a", "Persona_A")
     persona_b = package_data.get("target_persona_b", "Persona_B")
     artifacts = package_data.get("artifacts", [])

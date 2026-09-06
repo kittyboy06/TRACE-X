@@ -11,6 +11,9 @@ import { SensitivityTuner } from './components/attribution/SensitivityTuner';
 import { AnalystActions } from './components/attribution/AnalystActions';
 import { EvidenceDrawer } from './components/drawer/EvidenceDrawer';
 import { UploadModal } from './components/UploadModal';
+import { PresentationBar } from './components/presentation/PresentationBar';
+import { DemoTourModal } from './components/presentation/DemoTourModal';
+import { DEMO_FALLBACK_CASE_1, DEMO_FALLBACK_CASE_2 } from './utils/demoFallbackData';
 
 export const App: React.FC = () => {
   const [activeCase, setActiveCase] = useState<'1' | '2' | 'custom'>('1');
@@ -35,6 +38,11 @@ export const App: React.FC = () => {
   // Stable ID selections for bidirectional drilldown
   const [selectedNodeId, setSelectedNodeId] = useState<string | undefined>();
   const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | undefined>();
+
+  // Presentation Mode state (Decision #13: purely client-local)
+  const [isPresentationMode, setIsPresentationMode] = useState(false);
+  const [isTourOpen, setIsTourOpen] = useState(false);
+  const [isFallbackActive, setIsFallbackActive] = useState(false);
 
   const activeStreamRef = React.useRef<EventSource | null>(null);
   const hasInitialized = React.useRef(false);
@@ -106,6 +114,7 @@ export const App: React.FC = () => {
 
     try {
       const loadRes = await api.loadBenchmark(caseNum);
+      setIsFallbackActive(false);
       setInvestigationId(loadRes.investigation_id);
       setPersonaA(loadRes.persona_a);
       setPersonaB(loadRes.persona_b);
@@ -115,6 +124,18 @@ export const App: React.FC = () => {
     } catch (err) {
       console.error('Failed to load benchmark', err);
       setIsProcessing(false);
+      // Emergency failsafe fallback if presentation mode is active
+      if (isPresentationMode) {
+        setIsFallbackActive(true);
+        const fallback = caseNum === '2' ? DEMO_FALLBACK_CASE_2 : DEMO_FALLBACK_CASE_1;
+        setAssessment(fallback);
+        setInvestigationId(fallback.investigation_id);
+        setPersonaA(fallback.target_persona_a);
+        setPersonaB(fallback.target_persona_b);
+        setProgressStage('COMPLETE');
+        setProgressPct(100);
+        setProgressMsg(`Demo Fallback Loaded: ${fallback.attribution_state} (S_base: ${fallback.base_score.toFixed(4)})`);
+      }
     }
   };
 
@@ -189,6 +210,18 @@ export const App: React.FC = () => {
 
   return (
     <div className="h-screen w-screen flex flex-col bg-[#030712] text-slate-100 overflow-hidden select-none">
+      {/* 5-Minute Judge Presentation Bar (Decision #13) */}
+      {isPresentationMode && (
+        <PresentationBar
+          activeScenario={activeCase === '1' ? 'CASE_1' : activeCase === '2' ? 'CASE_2' : undefined}
+          onSelectScenario={(sc) => runCase(sc === 'CASE_1' ? '1' : '2')}
+          onOpenTour={() => setIsTourOpen(true)}
+          onClosePresentationMode={() => setIsPresentationMode(false)}
+          isFallbackActive={isFallbackActive}
+          isLoading={isProcessing}
+        />
+      )}
+
       {/* Header Bar */}
       <Header
         investigationId={investigationId}
@@ -202,6 +235,8 @@ export const App: React.FC = () => {
         onExport={handleExportPdf}
         onOpenUpload={() => setIsUploadOpen(true)}
         isProcessing={isProcessing}
+        isPresentationMode={isPresentationMode}
+        onTogglePresentationMode={() => setIsPresentationMode(prev => !prev)}
       />
 
       {/* Pipeline SSE Status Ticker */}
@@ -307,6 +342,13 @@ export const App: React.FC = () => {
         isOpen={isUploadOpen}
         onClose={() => setIsUploadOpen(false)}
         onUploadSuccess={handleUploadSuccess}
+      />
+
+      {/* 5 Demonstration Pillars Tour Modal (Decision #13) */}
+      <DemoTourModal
+        isOpen={isTourOpen}
+        onClose={() => setIsTourOpen(false)}
+        onSelectScenario={(sc) => runCase(sc === 'CASE_1' ? '1' : '2')}
       />
     </div>
   );

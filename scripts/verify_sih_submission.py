@@ -248,6 +248,11 @@ def run_all_checkpoints():
         assert pipe_assess1.confidence_band.value == "HIGH"
         assert pipe_assess1.real_world_identity == "NOT ESTABLISHED"
         pipe_sbase1 = round(float(pipe_assess1.base_score), 4)
+        eng_type1 = pipe_assess1.evidence_dimensions.stylometric.supporting_details.get("engine_type", "DETERMINISTIC_FALLBACK")
+        expected_sbase1 = 0.7735 if eng_type1 == "TRANSFORMER" else 0.7639
+        assert abs(pipe_sbase1 - expected_sbase1) <= 0.0001, (
+            f"Case 1 canonical benchmark drift: expected canonical {expected_sbase1:.4f} for {eng_type1}, got {pipe_sbase1:.4f}"
+        )
 
         # 1. DB Value
         db = SessionLocal()
@@ -273,11 +278,11 @@ def run_all_checkpoints():
         )
 
         dur = time.perf_counter() - t0
-        print_checkpoint(6, "Case 1 Convergence & Numerical Consistency", "PASS", dur, f"Authoritative S_base={pipe_sbase1:.4f} (LIKELY_LINK) verified across Pipeline/DB/API/Report")
+        print_checkpoint(6, "Case 1 Convergence & Deterministic Benchmark", "PASS", dur, f"Authoritative S_base={pipe_sbase1:.4f} (canonical {expected_sbase1:.4f}, LIKELY_LINK) verified across Pipeline/DB/API/Report")
         checkpoints_passed += 1
     except Exception as e:
         dur = time.perf_counter() - t0
-        print_checkpoint(6, "Case 1 Convergence & Numerical Consistency", "FAIL", dur, str(e))
+        print_checkpoint(6, "Case 1 Convergence & Deterministic Benchmark", "FAIL", dur, str(e))
         return False
 
     # -------------------------------------------------------------------------
@@ -298,6 +303,16 @@ def run_all_checkpoints():
         assert pipe_assess2.confidence_band.value == "LOW"
         assert pipe_assess2.hard_gate_applied is True
         pipe_sbase2 = round(float(pipe_assess2.base_score), 4)
+
+        # ---------------------------------------------------------------------
+        # Frozen Canonical Benchmark Assertion
+        # ---------------------------------------------------------------------
+        # Level 2 Hard Gate enforced; stylometry guardrail triggered (<150w) -> 0.0
+        # S_base = 0.30(0.15) + 0.25(0.36) + 0.20(0.0) + 0.15(0.0) + 0.10(0.80) = 0.2150
+        expected_sbase2 = 0.2150
+        assert abs(pipe_sbase2 - expected_sbase2) <= 0.0001, (
+            f"Case 2 canonical benchmark drift: expected canonical {expected_sbase2:.4f}, got {pipe_sbase2:.4f}"
+        )
 
         # Cross-Phase Check for Case 2
         db = SessionLocal()
@@ -320,7 +335,7 @@ def run_all_checkpoints():
         )
 
         dur = time.perf_counter() - t0
-        print_checkpoint(7, "Case 2 Contradiction Gate & Score Preservation", "PASS", dur, f"Level 2 Hard Gate enforced INCONCLUSIVE while preserving authoritative S_base={pipe_sbase2:.4f}")
+        print_checkpoint(7, "Case 2 Contradiction Gate & Score Preservation", "PASS", dur, f"Level 2 Hard Gate enforced INCONCLUSIVE while preserving authoritative canonical S_base={pipe_sbase2:.4f}")
         checkpoints_passed += 1
     except Exception as e:
         dur = time.perf_counter() - t0

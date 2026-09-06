@@ -3,6 +3,13 @@ frontend/node_modules
 frontend/dist
 backend/__pycache__
 backend/.pytest_cache
-backend/tracex.db
+backend/tracex.db*
+*.db*
+.env
+.env.*
+venv/
+.venv/
 .git
 .gitignore
+data/
+*.log

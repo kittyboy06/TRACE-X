@@ -1,4 +1,5 @@
 import re
+import zlib
 import numpy as np
 import logging
 from typing import List, Dict, Any, Optional, Tuple
@@ -113,7 +114,7 @@ class StylometricEngine:
 
         vector = np.zeros(64)
         for i, word in enumerate(words):
-            idx = (hash(word) % 60) + 4
+            idx = (zlib.crc32(word.encode("utf-8")) % 60) + 4
             vector[idx] += 1.0
 
         # Punctuation & syntactic signals

@@ -161,3 +161,10 @@ export interface PipelineProgressEvent {
   message: string;
   timestamp?: string;
 }
+
+export interface PresentationModeState {
+  enabled: boolean;
+  activeScenario?: 'CASE_1' | 'CASE_2';
+  tourStep?: number;
+  timerSeconds?: number;
+}

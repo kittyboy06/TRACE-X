@@ -5,7 +5,7 @@
 
 ---
 
-[![CI Test Suite](https://img.shields.io/badge/Tests-95%2F95%20Passed-emerald?style=flat-square&logo=pytest)](https://pytest.org)
+[![CI Test Suite](https://img.shields.io/badge/Tests-97%2F97%20Passed-emerald?style=flat-square&logo=pytest)](https://pytest.org)
 [![SIH Checkpoints](https://img.shields.io/badge/SIH%20Checkpoints-10%2F10%20Verified-blue?style=flat-square&logo=checkmarx)](scripts/verify_sih_submission.py)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110.0-009688?style=flat-square&logo=fastapi)](https://fastapi.tiangolo.com)
 [![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.14-3776AB?style=flat-square&logo=python)](https://www.python.org)
@@ -421,18 +421,19 @@ TRACE-X includes two frozen benchmark scenarios locked to Phase 0 SHA-256 crypto
 +------------------------------------+------------------------------------------+---------------------------------+
 | Case 1: Operation GhostSpecter     | • EV-001-PGP: Primary RSA-4096 (0x9B8A7C)| State: LIKELY_LINK              |
 | (Multi-Modal Convergence)          | • EV-002-PGP-USE: Exact Key reuse        | Confidence Band: HIGH           |
-|                                    | • EV-003-POSTS-A: Dread post (180 words) | Base Score (S_base): ~0.7532    |
-|                                    | • EV-004-POSTS-B: Exploit post (180 words| Level 1 Dampening Applied:      |
-|                                    | • EV-005-BTC-TX: Peeling chain to Kraken | CoinJoin dampens financial from |
-|                                    | • EV-006-INFRA: Shared TLS cert & SSH    | 0.90 to 0.54. Multi-modal       |
+|                                    | • EV-003-POSTS-A: Dread post (180 words) | Base Score (S_base): 0.7639     |
+|                                    | • EV-004-POSTS-B: Exploit post (180 words| (0.7735 with live transformer)  |
+|                                    | • EV-005-BTC-TX: Peeling chain to Kraken | Level 1 Dampening Applied:      |
+|                                    | • EV-006-INFRA: Shared TLS cert & SSH    | CoinJoin dampens financial from |
+|                                    |                                          | 0.90 to 0.54. Multi-modal       |
 |                                    |                                          | evidence cleanly converges.     |
 +------------------------------------+------------------------------------------+---------------------------------+
 | Case 2: Operation DeceptiveClone   | • EV-101-PGP-SHADOW: ED25519 Key         | State: INCONCLUSIVE             |
 | (Anti-False-Positive Hard Gate)    | • EV-102-PGP-PHANTOM: RSA-4096 Key       | Confidence Band: LOW            |
-|                                    | • EV-103-POSTS-SHADOW: 168 words         | Base Score (S_base): Preserved  |
-|                                    | • EV-104-POSTS-PHANTOM: 169 words        | Level 2 Hard Gate Triggered:    |
-|                                    | • EV-105-BTC-MIXING: Samourai Whirlpool  | TEMPORAL_CONCURRENCY_CLASH      |
-|                                    | • EV-106-TEMPORAL-CLASH: 30s concurrent  | (Frankfurt vs Singapore nodes)  |
+|                                    | • EV-103-POSTS-SHADOW: 118 words (<150w) | Base Score (S_base): 0.2150     |
+|                                    | • EV-104-POSTS-PHANTOM: 114 words (<150w)| (Preserved under Hard Gate)     |
+|                                    | • EV-105-BTC-MIXING: Samourai Whirlpool  | Level 2 Hard Gate Triggered:    |
+|                                    | • EV-106-TEMPORAL-CLASH: 30s concurrent  | TEMPORAL_CONCURRENCY_CLASH      |
 |                                    |   admin actions in Frankfurt & Singapore | Overrides fused score to        |
 |                                    |                                          | prevent false-positive link.    |
 +------------------------------------+------------------------------------------+---------------------------------+

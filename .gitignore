@@ -27,9 +27,11 @@ env/
 
 # SQLite & Databases
 *.db
+*.db-*
 *.sqlite
 *.sqlite3
-backend/tracex.db
+tracex.db*
+backend/tracex.db*
 
 # Node & Frontend Build
 node_modules/

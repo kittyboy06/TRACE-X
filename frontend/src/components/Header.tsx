@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Shield, FileText, UploadCloud, AlertTriangle, ChevronDown, Table, Code } from 'lucide-react';
+import { Shield, FileText, UploadCloud, AlertTriangle, ChevronDown, Table, Code, MonitorPlay } from 'lucide-react';
 
 interface HeaderProps {
   investigationId: string;
@@ -13,6 +13,8 @@ interface HeaderProps {
   onExport: () => void;
   onOpenUpload: () => void;
   isProcessing: boolean;
+  isPresentationMode?: boolean;
+  onTogglePresentationMode?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -26,7 +28,9 @@ export const Header: React.FC<HeaderProps> = ({
   onExportJson,
   onExport,
   onOpenUpload,
-  isProcessing
+  isProcessing,
+  isPresentationMode = false,
+  onTogglePresentationMode
 }) => {
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -136,6 +140,21 @@ export const Header: React.FC<HeaderProps> = ({
           <UploadCloud className="w-3.5 h-3.5 text-slate-300 shrink-0" />
           <span>Upload</span>
         </button>
+
+        {onTogglePresentationMode && (
+          <button
+            onClick={onTogglePresentationMode}
+            className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-md text-xs font-mono font-medium transition whitespace-nowrap shrink-0 border ${
+              isPresentationMode
+                ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50 shadow-sm shadow-cyan-900/50'
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+            }`}
+            title="Toggle 5-Minute Judge Presentation Mode (Decision #13)"
+          >
+            <MonitorPlay className={`w-3.5 h-3.5 shrink-0 ${isPresentationMode ? 'text-cyan-400 animate-pulse' : 'text-slate-400'}`} />
+            <span>Presentation</span>
+          </button>
+        )}
 
         {/* Multi-Format Dossier Export Split Button */}
         <div className="relative inline-flex items-stretch rounded-md shadow-sm shrink-0" ref={menuRef}>

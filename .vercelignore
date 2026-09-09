@@ -1,0 +1,29 @@
+# Database files
+*.db
+*.db-shm
+*.db-wal
+tracex.db*
+
+# Python & Testing artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+env/
+venv/
+
+# Docker
+docker-compose.yml
+Dockerfile
+backend/Dockerfile
+frontend/Dockerfile
+
+# Local and test scripts
+scripts/
+docs/
+Idea/
+
+# Git
+.git/
+.github/

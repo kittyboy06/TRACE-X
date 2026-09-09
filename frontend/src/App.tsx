@@ -122,20 +122,18 @@ export const App: React.FC = () => {
 
       startPipelineStream(loadRes.investigation_id);
     } catch (err) {
-      console.error('Failed to load benchmark', err);
+      console.warn('Backend service offline or unreachable, activating demonstration benchmark data:', err);
       setIsProcessing(false);
-      // Emergency failsafe fallback if presentation mode is active
-      if (isPresentationMode) {
-        setIsFallbackActive(true);
-        const fallback = caseNum === '2' ? DEMO_FALLBACK_CASE_2 : DEMO_FALLBACK_CASE_1;
-        setAssessment(fallback);
-        setInvestigationId(fallback.investigation_id);
-        setPersonaA(fallback.target_persona_a);
-        setPersonaB(fallback.target_persona_b);
-        setProgressStage('COMPLETE');
-        setProgressPct(100);
-        setProgressMsg(`Demo Fallback Loaded: ${fallback.attribution_state} (S_base: ${fallback.base_score.toFixed(4)})`);
-      }
+      // Resilient fallback ensures standalone Vercel preview operates seamlessly
+      setIsFallbackActive(true);
+      const fallback = caseNum === '2' ? DEMO_FALLBACK_CASE_2 : DEMO_FALLBACK_CASE_1;
+      setAssessment(fallback);
+      setInvestigationId(fallback.investigation_id);
+      setPersonaA(fallback.target_persona_a);
+      setPersonaB(fallback.target_persona_b);
+      setProgressStage('COMPLETE');
+      setProgressPct(100);
+      setProgressMsg(`Demo Benchmark Loaded: ${fallback.attribution_state} (S_base: ${fallback.base_score.toFixed(4)})`);
     }
   };
 

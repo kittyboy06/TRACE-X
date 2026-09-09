@@ -1,7 +1,8 @@
 import axios from 'axios';
 import { AttributionAssessment, CytoscapeGraphData, AuditEvent, SourceReliabilityRecord, ExtractedEntityRecord } from '../types';
 
-const API_BASE = '/api/v1';
+const envApiUrl = ((import.meta.env.VITE_API_URL as string) || '').trim();
+const API_BASE = envApiUrl ? `${envApiUrl.replace(/\/$/, '')}/api/v1` : '/api/v1';
 
 // Automatically inject JWT token into all outgoing requests
 axios.interceptors.request.use((config) => {

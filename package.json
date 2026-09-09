@@ -1,0 +1,11 @@
+{
+  "name": "tracex-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "TRACE-X Threat Relationship & Attribution Correlation Engine",
+  "scripts": {
+    "build": "npm run build --prefix frontend",
+    "dev": "npm run dev --prefix frontend",
+    "preview": "npm run preview --prefix frontend"
+  }
+}
